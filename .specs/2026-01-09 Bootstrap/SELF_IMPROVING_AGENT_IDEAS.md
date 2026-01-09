@@ -1,5 +1,90 @@
 # Agent Interface Paradigms: From REPL to Self-Development
 
+## Context: How This Exploration Began
+
+This document captures a deep exploration of coding agent architectures, starting from analysis of **agentlib** (a REPL-first agent framework) and building toward a design for **self-developing agents**.
+
+### The Starting Point: Agentlib's REPL-First Approach
+
+Agentlib (`/Users/dbrans/Code/agentlib`) takes a fundamentally different approach to coding agents than terminal-based tools like Claude Code or gemini-cli:
+
+- **Terminal-first agents**: LLM orchestrates discrete tool calls (JSON schemas, validated parameters)
+- **REPL-first agents**: LLM writes Python code that executes in a persistent subprocess
+
+**Key architectural insight from agentlib**: The LLM "lives inside" a Python REPL. Code is the native output, not JSON tool calls. State persists across turns. Tools are just Python functions.
+
+### The Questions That Drove This Exploration
+
+1. **What are the pros/cons of REPL-first vs terminal-first?** (Philosophical and practical)
+2. **What would a more mature REPL-first agent look like?** (Problems to avoid, new advantages)
+3. **How could reactive notebook concepts (marimo) inform agent design?**
+4. **Where does FastMCP fit in this discussion?**
+5. **How does all this inform approaches to self-developing coding agents?**
+6. **For self-developing agents: Image model (Smalltalk) or Source model (files)?**
+
+### Key Decisions Made
+
+- **Selected approach**: Hybrid (runtime-primary with dehydration to source files)
+- **Core insight**: Most frameworks assume source files define the agent. A self-developing agent inverts this—runtime is primary, source files are a serialization format.
+
+---
+
+## REPL-First vs Terminal-First: Initial Analysis
+
+### Pros of REPL-First (agentlib approach)
+
+1. **Cognitive Alignment**: LLMs trained on billions of lines of Python. Native idiom.
+2. **State Persistence**: Variables, functions survive across turns. No "where did I put that value?"
+3. **Eliminates Schema Friction**: Just call `glob("*.py")` instead of JSON tool call ceremony.
+4. **Composability**: `[read(f) for f in glob("*.py")[:5]]` — one turn, not five tool calls.
+5. **Richer Error Context**: Python tracebacks vs. exit code 1.
+6. **True Collaboration**: User can drop into same REPL (`/repl` command).
+7. **Syntax Error Handling**: Auto-retry without polluting conversation history.
+8. **Mid-Conversation Abstraction**: Define helper functions, use them later.
+
+### Cons of REPL-First
+
+1. **Subprocess Complexity**: IPC, signal handling, process isolation.
+2. **Python Lock-in**: `cargo build` routes through Python—feels unnatural for polyglot work.
+3. **Security Surface**: Arbitrary code execution larger than constrained tool calls.
+4. **Context Window Consumption**: `print(df.describe())` can dump hundreds of lines.
+5. **Model Dependency**: Not all models equally Python-fluent.
+6. **Debugging Opacity**: Bidirectional IPC harder to debug than request/response.
+7. **Environment Brittleness**: Python versions, dependencies, platform differences.
+8. **Auditability Trade-offs**: Stream of code/output harder to audit than discrete tool calls.
+
+### The Philosophical Divide
+
+**Terminal-first**: LLM as **orchestrator** — plans and coordinates discrete actions.
+**REPL-first**: LLM as **programmer** — writes code in a live environment, tight feedback loop.
+
+This reflects different views of intelligence:
+- Tool-based: Intelligence as planning and delegation
+- REPL-based: Intelligence as direct manipulation and experimentation
+
+---
+
+## Honest Assessment: What's Novel vs. Synthesis
+
+### Probably NOT Novel
+- REPL vs terminal comparison — obvious once you see agentlib
+- State persistence being useful — well understood
+- "Versioning is good" — standard wisdom
+- Dependency tracking — people have thought about this
+
+### Potentially Novel or Underexplored
+
+1. **"REPL as MCP server that grows"** — Agent doesn't just consume tools, it IS a server that self-extends. Most MCP discourse assumes agents call out to servers.
+
+2. **"Opaque runtime self" as specific failure mode** — REPL-first agents have a live self but can't easily see that self. Must introspect to understand own structure.
+
+3. **Blast radius awareness** — Agent explicitly knows "if I change X, these things break." Not just dependency tracking for correctness, but as cognitive aid for decision-making.
+
+### What This Document Is
+Primarily **useful framing and synthesis**, not a breakthrough invention. The most interesting seed is the MCP server inversion and the hybrid dehydration model.
+
+---
+
 ## Part 0: The Deeper Question — Image vs Source
 
 ### Two Models of Self-Modifying Systems
@@ -443,8 +528,384 @@ The unexplored frontier is an agent interface that combines all four: a **versio
 
 ---
 
+## Part 5: Concrete Implementation — Hybrid Self-Modifying Agent
+
+### What Can Be Hot-Reloaded vs. Requires Restart
+
+| Component | Hot-Reloadable | Mechanism |
+|-----------|---------------|-----------|
+| Tool implementations | ✓ | Update `_toolimpl` dict, re-inject into REPL |
+| Tool schemas | ✓ | Already lazy via `regen_toolspec` callbacks |
+| System prompt | ✓ | Update `conversation.messages[0]` |
+| Mixin composition | ✗ | MRO fixed at class creation |
+| Class structure | ✗ | Requires new class + state transfer |
+
+### The Dehydration/Commit Workflow
+
+```
+Agent experiments at runtime
+         ↓
++------------------+
+| modify_tool()    |  ← Runtime modification
+| system = "..."   |  ← In-memory change
++------------------+
+         ↓
++------------------+
+| Test in REPL     |  ← Agent runs with new behavior
++------------------+
+         ↓
++------------------+
+| commit_changes() |  ← Dehydrate to source
++------------------+
+         ↓
++-----------------------------------+
+| 1. ChangeTracker.get_changes()   |
+| 2. SourceGenerator.generate()    |
+| 3. ast.parse() validation        |
+| 4. Write to _generations/v{N}.py |
+| 5. git commit (optional)         |
++-----------------------------------+
+         ↓
++------------------+
+| Source files now |
+| canonical form   |
++------------------+
+```
+
+### Minimal Viable Implementation
+
+**New files to add:**
+```
+src/agentlib/self_modify/
+    __init__.py          # Export SelfModifyingMixin
+    tracker.py           # ChangeTracker - tracks what changed
+    generator.py         # SourceGenerator - runtime → source
+    mixin.py             # SelfModifyingMixin with tools
+```
+
+**Core classes:**
+
+```python
+# tracker.py
+@dataclass
+class ToolChange:
+    name: str
+    original_source: Optional[str]
+    current_source: str
+    timestamp: float
+
+class ChangeTracker:
+    def __init__(self, agent):
+        self.baseline = self._snapshot()
+        self.changes = {}
+
+    def record_tool_change(self, name, new_impl):
+        self.changes[name] = ToolChange(...)
+
+    def get_changes(self) -> AgentChanges:
+        return AgentChanges(tools=self.changes, ...)
+```
+
+```python
+# generator.py
+class SourceGenerator:
+    def generate_tool_source(self, impl, name) -> str:
+        """Convert runtime function to source code."""
+        # Leverage existing source_extract module
+        from agentlib.tools.source_extract import extract_method_source
+        return extract_method_source(impl, name)
+
+    def generate_class_source(self, agent, changes) -> str:
+        """Generate complete agent class definition."""
+        lines = [f"class {type(agent).__name__}(...):"]
+        for name, change in changes.tools.items():
+            lines.append("    @BaseAgent.tool")
+            lines.append(textwrap.indent(change.current_source, "    "))
+        return '\n'.join(lines)
+```
+
+```python
+# mixin.py
+class SelfModifyingMixin:
+    def _ensure_setup(self):
+        super()._ensure_setup()
+        self._tracker = ChangeTracker(self)
+
+    @BaseAgent.tool
+    def modify_tool(self, name: str, new_code: str):
+        """Modify a tool implementation at runtime."""
+        exec_globals = {}
+        exec(new_code, exec_globals)
+        new_impl = exec_globals.get(name)
+
+        self.__class__._toolimpl[name] = new_impl
+        self._tracker.record_tool_change(name, new_impl)
+
+        # Re-inject if REPL agent
+        if hasattr(self, '_tool_repl'):
+            self._reinject_tool(name, new_impl)
+
+        return f"Tool '{name}' updated. Call commit_changes() to persist."
+
+    @BaseAgent.tool
+    def commit_changes(self, message: str = "Commit message"):
+        """Persist runtime changes to source files."""
+        changes = self._tracker.get_changes()
+        if not changes.has_modifications():
+            return "No changes to commit"
+
+        source = SourceGenerator().generate_class_source(self, changes)
+
+        # Validate
+        ast.parse(source)
+
+        # Write to _generations/
+        output = self._get_generations_path()
+        output.write_text(source)
+
+        self._tracker.reset_baseline()
+        return f"Committed to {output}"
+```
+
+### REPL State Preservation
+
+For hot-reload that preserves REPL state:
+
+```python
+class REPLStateCapture:
+    CAPTURE_CODE = '''
+import json, types, inspect
+state = {'variables': {}, 'functions': {}, 'imports': []}
+for name, value in dict(globals()).items():
+    if name.startswith('_'): continue
+    if isinstance(value, types.FunctionType):
+        try: state['functions'][name] = inspect.getsource(value)
+        except: pass
+    elif isinstance(value, (int, float, str, bool, list, dict)):
+        state['variables'][name] = repr(value)
+print(json.dumps(state))
+'''
+
+    def capture(self, repl) -> dict:
+        output = repl.execute(self.CAPTURE_CODE)
+        return json.loads(output.split('\n')[-1])
+
+    def restore(self, repl, state: dict):
+        for line in state['imports']:
+            repl.execute(line)
+        for name, val in state['variables'].items():
+            repl.execute(f"{name} = {val}")
+        for source in state['functions'].values():
+            repl.execute(source)
+```
+
+### Self-Awareness Tools
+
+```python
+class SelfAwareMixin:
+    @BaseAgent.tool
+    def read_my_source(self) -> str:
+        """Read this agent's source code."""
+        return inspect.getsource(type(self))
+
+    @BaseAgent.tool
+    def read_tool_source(self, name: str):
+        """Read a specific tool's source."""
+        impl = self._toolimpl.get(name)
+        return inspect.getsource(impl) if impl else f"Not found: {name}"
+
+    @BaseAgent.tool
+    def list_my_tools(self) -> List[str]:
+        """List available tools."""
+        return list(self.toolspecs.keys())
+```
+
+### Critical Files to Modify
+
+| File | Purpose |
+|------|---------|
+| `agent.py` | Understand `_toolimpl`, `_toolspec`, `AgentMeta` |
+| `repl_agent.py` | `ToolREPL`, tool injection, REPL state |
+| `tools/source_extract.py` | Foundation for `SourceGenerator` |
+| `tool_mixin.py` | Pattern for hook-based mixins |
+
+### Extension Points
+
+1. **Commit strategies** - `_generations/`, sibling file, overwrite original
+2. **Validation hooks** - Linting, tests, type checking before commit
+3. **Version control** - Auto git commit after dehydration
+4. **Approval workflow** - Human-in-the-loop before commit
+5. **CLI commands** - `/commit`, `/rollback`, `/diff`
+
+---
+
+## Summary: The Novel Contribution
+
+**What's genuinely new here:**
+
+1. **The Hybrid Model** — Neither pure Smalltalk image nor pure source files. Runtime is primary for experimentation; source files are a serialization format for versioning and transmission.
+
+2. **Dehydration as First-Class Operation** — `commit_changes()` as a tool the agent can call, not an external operation performed on the agent.
+
+3. **Self-Awareness Tooling** — `read_my_source()`, `read_tool_source()`, `list_my_tools()` as tools enabling the agent to understand its own structure.
+
+4. **Selective Hot-Reload** — Some components (tools, prompts) reload without restart; others (mixins) require warm restart with state transfer.
+
+5. **REPL State Preservation** — Capture and restore subprocess state across reloads, maintaining continuity.
+
+**The philosophical shift:**
+
+> Most agent frameworks assume the agent is defined by source files. The running agent is disposable—restart from source.
+>
+> A self-developing agent inverts this. The running agent is primary; source files are a serialization format.
+
+---
+
+## Appendix A: Agentlib Architecture Deep Dive
+
+This section captures the detailed exploration of agentlib's internals that informed the implementation design.
+
+### Core Components
+
+**BaseAgent** (`src/agentlib/agent.py`)
+- Metaclass-based tool registry (`AgentMeta`)
+- `_toolimpl`: Dict of tool implementations (methods)
+- `_toolspec`: Dict of Pydantic models for tool schemas
+- Tools registered via `@BaseAgent.tool` decorator
+
+**REPLAgent** (`src/agentlib/repl_agent.py`)
+- Replaces tool-calling with code execution
+- Manages `ToolREPL` subprocess
+- Statement-by-statement execution with output streaming
+- Syntax error auto-retry (up to 3 attempts, doesn't pollute history)
+
+**ToolREPL** (`src/agentlib/repl_agent.py`)
+- Persistent Python subprocess with bidirectional IPC
+- Two tool patterns:
+  - **Injected** (`inject=True`): Source extracted, runs in subprocess (zero IPC overhead)
+  - **Relay** (default): Stub in subprocess calls back to main process
+
+**Mixin System**
+- Capabilities composed via multiple inheritance
+- Hook methods chain via `super()`: `_ensure_setup()`, `_build_system_prompt()`, `_handle_toolcall()`, `_cleanup()`
+- Key mixins: `MCPMixin`, `CLIMixin`, `JinaMixin`, `SandboxMixin`, `FilePatchMixin`
+
+### File Structure
+
+```
+src/agentlib/
+├── agent.py              # BaseAgent, AgentMeta, @tool decorator
+├── repl_agent.py         # REPLAgent, ToolREPL, REPLMixin
+├── conversation.py       # Message history management
+├── client.py             # LLMClient (API calls)
+├── *_mixin.py            # Capability mixins
+├── agents/
+│   └── code_agent.py     # CodeAgent (production implementation)
+└── tools/
+    ├── subrepl.py        # SubREPL subprocess manager
+    └── source_extract.py # Extract method source for injection
+```
+
+### What Can Be Modified at Runtime
+
+| Component | Runtime Mutable | Persistable | Mechanism |
+|-----------|-----------------|-------------|-----------|
+| System prompt | ✓ | ✓ (save_session) | `conversation.messages[0]` |
+| Tool implementations | ✓ (monkey-patch) | ✗ | Update `_toolimpl` dict |
+| Tool schemas | Limited | ✗ | `regen_toolspec` callbacks |
+| Conversation history | ✓ | ✓ (JSON) | Direct manipulation |
+| REPL state | ✓ | ✗ | Subprocess memory |
+| Mixin composition | ✗ | ✗ | MRO fixed at class creation |
+
+### Key Implementation Details
+
+**Tool Registration** (agent.py:38-39):
+```python
+cls._toolimpl = {}  # name -> implementation
+cls._toolspec = {}  # name -> Pydantic schema (or regen callback)
+```
+
+**Tool Injection** (source_extract.py):
+- Uses `inspect.getsource()` to get method source
+- Parses to AST, removes 'self' parameter
+- `ast.unparse()` to regenerate clean Python
+- Injected into subprocess at startup
+
+**Conversation Persistence** (CodeAgent):
+```python
+def save_session(self, filename):
+    json.dump(self.conversation.messages, open(filename, "w"))
+
+def load_session(self, filename):
+    self.conversation.messages = json.load(open(filename))
+```
+
+**What's NOT Supported**:
+- Dynamic tool schema registration (without MCP pattern)
+- Full agent serialization (only messages)
+- Dynamic mixin application after class creation
+- Modifying MRO at runtime
+
+### The Gap This Reveals
+
+Agentlib is designed for **capability composition** (mixins at class definition) and **runtime behavior modification** (monkey-patching), but NOT for **persistent self-modification**. An agent can modify its runtime behavior, but changes are lost on restart. The only way to persist is to edit source files—requiring restart.
+
+This gap motivates the Hybrid model: runtime modifications for experimentation, dehydration to source files for persistence.
+
+---
+
+## Appendix B: Marimo Reactive Model
+
+Key concepts from marimo that informed the agent design:
+
+**Static Dependency Analysis**: System knows cell dependencies without execution
+**Automatic Cascade**: Changing a cell re-runs all dependents
+**No Hidden State**: Deleting a cell removes its variables from memory
+**Lazy Evaluation**: Can mark cells stale instead of auto-running
+**Deterministic Order**: Execution follows DAG, not cell position
+**Pure Python Storage**: Notebooks are `.py` files, not JSON (git-friendly)
+
+**Marimo's Constraints**:
+- No mutation tracking (must create new variables)
+- Each global variable defined by exactly one cell
+- Forces functional decomposition
+
+---
+
+## Appendix C: FastMCP Relevance
+
+**FastMCP's Philosophy**: Decorator-based tool definition with minimal ceremony.
+
+```python
+@mcp.tool
+def search(query: str) -> list[str]:
+    """Search for files."""
+    return glob.glob(query)
+```
+
+Function signature → schema. Docstring → description. No boilerplate.
+
+**Connection to Self-Development**:
+- REPL-first agents could use FastMCP-style decoration for runtime tool creation
+- The REPL could BE an MCP server that grows
+- `@tool` decorator in REPL = self-programming via capability definition
+
+---
+
 ## Sources
 
 - [FastMCP GitHub](https://github.com/jlowin/fastmcp) - Pythonic MCP framework
 - [Marimo Documentation](https://docs.marimo.io/) - Reactive notebook concepts
 - [Google Cloud MCP Announcement](https://cloud.google.com/blog/products/ai-machine-learning/announcing-official-mcp-support-for-google-services) - MCP ecosystem growth
+
+---
+
+## How to Continue This Work
+
+To continue this exploration from this document:
+
+1. **If exploring further**: The key open questions are in "Potentially Novel or Underexplored" section
+2. **If implementing**: Start with Part 5's MVP — create `src/agentlib/self_modify/` with tracker, generator, and mixin
+3. **If extending the design**: Consider the reactive notebook integration (dependency DAG for agent state)
+
+**The core implementation insight**: Leverage existing `source_extract.py` for dehydration. The hard problem is closure capture and dynamic dependencies.

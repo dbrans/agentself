@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "A self-improving coding agent"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "anthropic>=0.40",
+]
+
+[project.scripts]
+agentself = "agentself.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -27,7 +32,7 @@ target-version = "py311"
 select = ["E", "F", "I", "W"]
 
 [tool.uv]
-managed = false
+managed = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
