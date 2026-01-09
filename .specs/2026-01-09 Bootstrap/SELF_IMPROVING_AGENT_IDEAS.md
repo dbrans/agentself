@@ -1,0 +1,450 @@
+# Agent Interface Paradigms: From REPL to Self-Development
+
+## Part 0: The Deeper Question — Image vs Source
+
+### Two Models of Self-Modifying Systems
+
+**Smalltalk Image Model:**
+- The running system IS the source of truth
+- "Source code" is derived from the image, not vice versa
+- Self-modification = mutate the live image
+- Persistence = snapshot the image
+- Versioning = image snapshots (hard to diff, hard to merge)
+- Transmission = send the image
+- **Philosophy**: The living system is primary; text is just a view
+
+**Source File Model:**
+- Files on disk are the source of truth
+- Running system is instantiated FROM files
+- Self-modification = edit source files, then reload/restart
+- Persistence = the files themselves
+- Versioning = git (diffable, reviewable, mergeable)
+- Transmission = share files
+- **Philosophy**: Text is primary; the running system is ephemeral
+
+### What Agentlib Currently Does
+
+Based on codebase exploration, agentlib sits awkwardly between these models:
+
+| Component | Where It Lives | Mutable at Runtime | Persistable |
+|-----------|---------------|-------------------|-------------|
+| System prompt | Memory (conversation[0]) | ✓ | ✓ (via save_session) |
+| Tool implementations | Class methods | ✓ (monkey-patch) | ✗ |
+| Tool schemas | Metaclass registry | ✗ | ✗ |
+| Conversation history | Memory | ✓ | ✓ (JSON) |
+| REPL state | Subprocess | ✓ | ✗ |
+| Mixin composition | Class definition | ✗ | ✗ |
+| Agent class itself | Source files | ✗ | ✓ (it's just files) |
+
+**The gap**: An agent can modify its runtime behavior (monkey-patch tools, change system prompt), but these changes are lost on restart. The only way to persist changes is to edit source files—but then you need to restart.
+
+### The Three Approaches to Self-Modification
+
+#### Approach A: Pure Image (Smalltalk-style)
+
+```
+Agent runs → Modifies itself in memory → Snapshots image → Restores from image
+```
+
+**Would require:**
+- Full agent serialization (not just conversation)
+- Serialize tool implementations (code as data)
+- Serialize REPL subprocess state
+- Image diff/merge tools
+
+**Advantages:**
+- Seamless live modification
+- No restart friction
+- State continuity
+
+**Disadvantages:**
+- Hard to review changes (what changed between image v3 and v4?)
+- Hard to merge (two agents diverged, how to combine?)
+- Opaque to external tools (git doesn't understand images)
+
+#### Approach B: Pure Source (Traditional)
+
+```
+Agent runs → Edits its own source files → Restarts → New agent instance
+```
+
+**Would require:**
+- Agent understands its own source structure
+- Agent can generate valid source from intent
+- Hot-reload or graceful restart mechanism
+- State migration (conversation history survives restart)
+
+**Advantages:**
+- Standard tooling (git, diff, code review)
+- Clear audit trail
+- Mergeable, shareable
+
+**Disadvantages:**
+- High friction (restart required)
+- State discontinuity (REPL state lost)
+- Agent must understand Python source manipulation
+
+#### Approach C: Hybrid (Dehydrate/Rehydrate)
+
+```
+Agent runs → Modifies in memory (fast) → "Commits" to source files → Optionally hot-reloads
+```
+
+**The key insight**: Separate **working state** from **canonical state**.
+
+- **Working state**: Live runtime modifications (experimental)
+- **Canonical state**: Source files (durable, versionable)
+- **Commit operation**: Dehydrate working state to canonical state
+- **Hot-reload**: Rehydrate canonical state without full restart (where possible)
+
+**Would require:**
+1. **Dehydration**: Generate source code from runtime state
+   - Tool implementations → method definitions
+   - System prompt → attribute or method
+   - Dynamic tools → registered tool definitions
+
+2. **Selective hot-reload**:
+   - Some components can reload (tool implementations, system prompt)
+   - Some require restart (mixin composition, class structure)
+
+3. **State migration**:
+   - Conversation history preserved across reload
+   - REPL state checkpointed and restored
+
+### What Self-Modification Actually Means
+
+For an agent to "write itself to disk for versioning and transmission":
+
+**The Minimal Version:**
+```python
+class SelfModifyingAgent:
+    def commit_changes(self):
+        """Write current state to source files."""
+        # 1. Generate source for modified tools
+        for name, impl in self._modified_tools.items():
+            source = self._dehydrate_tool(name, impl)
+            self._write_to_source_file(source)
+
+        # 2. Generate source for system prompt changes
+        if self._system_modified:
+            self._write_system_prompt_to_source()
+
+        # 3. Git commit
+        self._git_commit("Agent self-modification")
+
+    def _dehydrate_tool(self, name, impl):
+        """Convert runtime tool to source code."""
+        # This is the hard part - going from runtime → source
+        return inspect.getsource(impl)  # Only works for some cases
+```
+
+**The Hard Problems:**
+1. **Runtime → Source translation**: How do you turn a monkey-patched method back into source?
+2. **Closure capture**: If the tool references variables from its closure, those need to be captured
+3. **Dynamic dependencies**: If the tool was defined based on runtime state, how to reproduce?
+4. **Schema generation**: Tool schemas are generated at class-definition time; how to update?
+
+### The Novel Insight
+
+**Most agent frameworks assume the agent is defined by source files.** The running agent is disposable; restart from source.
+
+**A self-developing agent inverts this.** The running agent is primary; source files are a serialization format for versioning and transmission.
+
+This is the Smalltalk philosophy applied to agents—but with a crucial addition: **the ability to dehydrate to diffable, mergeable source files**.
+
+---
+
+## Part 1: A More Mature REPL-First Coding Agent
+
+### Problems in Current REPL-First Approaches (agentlib) That Could Be Avoided
+
+**1. Opaque Runtime State**
+The agent must actively introspect (`dir()`, `inspect.getsource()`) to understand what's currently defined. There's no "table of contents" for the REPL's state. A mature implementation would maintain and expose a **live symbol table** showing all defined functions, classes, and variables with their types and origins.
+
+**2. Linear, Append-Only History**
+Each turn appends to history. The agent can't say "actually, let me redo turn 3 differently." Current workaround: redefine everything from scratch. A mature implementation would support **non-destructive editing of historical turns** with replay.
+
+**3. Context Window Pollution**
+Verbose outputs (DataFrames, tracebacks, logs) consume tokens. Current mitigation: truncation to temp files. Better: **semantic summarization** of outputs. Instead of 500 lines of DataFrame, the agent sees: `DataFrame[1000 rows × 15 cols]: sales data, numeric columns [revenue, quantity], categorical [region, product]`.
+
+**4. No Dependency Tracking**
+If the agent redefines `helper_function()`, it has no idea what else might break. A mature implementation would track **which definitions depend on which**, warning: "Redefining `process()` will invalidate `analyze()` and `report()`."
+
+**5. Subprocess Debugging Opacity**
+When something goes wrong in the ToolREPL subprocess, debugging is hard. The IPC layer obscures what's happening. A mature implementation would have **better observability**: structured logs, state snapshots, replay capability.
+
+**6. All-or-Nothing Tool Injection**
+Tools are either injected (fast, runs in subprocess) or relayed (flexible, IPC overhead). A mature implementation might support **lazy injection**: relay by default, inject on first use if the function is pure.
+
+### New Advantages a Mature REPL-First Agent Could Offer
+
+**1. Computed Context Summaries**
+Instead of raw conversation history, provide computed summaries: "You've defined 5 functions, loaded 2 DataFrames, the last error was X." This is **meta-cognition support**.
+
+**2. Speculative Execution**
+"What if I changed X?" → Fork the REPL, try it, report results, discard fork. **Safe exploration** without polluting the main state.
+
+**3. Rich Output Integration**
+Plots, tables, images rendered and described. The agent doesn't see `<Figure at 0x...>`, it sees the actual visualization (multimodal) or a semantic description.
+
+**4. Persistent Sessions Across Conversations**
+Save/restore REPL state between conversations. The agent picks up where it left off. **Continuity of self.**
+
+**5. Multi-REPL Environments**
+Separate REPLs for different concerns: one for data exploration, one for tool development, one for testing. **Cognitive separation** that mirrors how humans organize work.
+
+**6. Native Undo/Checkpoint**
+`checkpoint("before risky change")` → try something → `restore("before risky change")`. Built into the paradigm, not bolted on.
+
+---
+
+## Part 2: Reactive Notebook Concepts Applied to Agents
+
+### Key Marimo Concepts
+
+1. **Static dependency analysis**: The system knows which cells reference which variables without executing them
+2. **Automatic cascade**: Changing a cell re-runs all dependents
+3. **No hidden state**: Deleting a cell removes its variables
+4. **Lazy evaluation option**: Mark as stale instead of auto-running
+5. **Deterministic order**: Execution follows the DAG, not position
+6. **Immutable-style updates**: No mutation tracking, create new variables
+
+### How These Could Inform Agent Design
+
+**1. Dependency-Aware Context**
+Instead of linear conversation history, the agent sees a **dependency graph**:
+```
+[data_loading] → [preprocessing] → [analysis] → [visualization]
+                         ↓
+                   [validation]
+```
+The agent knows: "If I change preprocessing, analysis, visualization, and validation all need re-evaluation."
+
+**2. Selective Re-Execution**
+When the agent modifies something, it can choose:
+- **Eager**: Cascade now, see all effects
+- **Lazy**: Mark dependents stale, defer execution
+- **Selective**: Only cascade through certain paths
+
+This gives the agent **control over the blast radius** of changes.
+
+**3. Cell-Level Versioning**
+Each logical unit (cell) has version history. The agent can:
+- Compare versions: "What changed between v2 and v5 of the analysis cell?"
+- Revert selectively: "Go back to v3 of preprocessing, keep everything else"
+- Branch: "Try two different approaches to analysis, compare results"
+
+**4. Structured Self-Representation**
+The DAG IS the agent's working memory, made explicit. Instead of implicit state buried in a subprocess, the structure is a first-class object the agent can reason about.
+
+**5. Constraint-Driven Modularity**
+Marimo's "no mutation" constraint forces functional decomposition. For agents, this could mean: **each capability is a cell**, with explicit inputs and outputs. Self-modification becomes: edit the cell that defines the capability.
+
+**6. Reproducibility by Construction**
+Because execution order follows dependencies (not history), the same DAG always produces the same result. **Determinism** that terminal agents struggle to achieve.
+
+### The Translation to Agent Terms
+
+| Marimo Concept | Agent Equivalent |
+|----------------|------------------|
+| Cell | Logical unit of computation (could span multiple "turns") |
+| Variable | Named result that other computations can reference |
+| Dependency | "This computation uses the result of that computation" |
+| Stale | "This result may be invalid because an upstream changed" |
+| Re-execute | Re-run computation with current inputs |
+| DAG | The agent's "working memory structure" |
+
+---
+
+## Part 3: Where FastMCP Fits In
+
+### FastMCP's Core Insight
+
+FastMCP's philosophy: **decorator-based tool definition with minimal ceremony**.
+
+```python
+@mcp.tool
+def search_files(pattern: str) -> list[str]:
+    """Find files matching pattern."""
+    return glob.glob(pattern)
+```
+
+That's it. The function signature becomes the schema. The docstring becomes the description. No separate JSON schema, no registration boilerplate.
+
+### Relevance to REPL-First vs Terminal-First
+
+**Terminal-first agents** typically consume MCP tools as external services. The tools exist outside the agent, accessed via protocol.
+
+**REPL-first agents** could **define tools at runtime** using FastMCP-style decoration:
+
+```python
+# In the REPL, the agent writes:
+@tool
+def custom_analyzer(data: DataFrame) -> dict:
+    """Analyze data using domain-specific logic I just figured out."""
+    return {...}
+
+# Now custom_analyzer is available as a tool
+```
+
+This is **self-programming via tool definition**. The agent extends its own capabilities by writing decorated functions.
+
+### The Deeper Connection: REPL as MCP Server
+
+What if the agent's REPL **is** an MCP server?
+
+- Tools defined in the REPL become available via MCP
+- Other agents (or the same agent in a different context) can call them
+- The REPL's state is the server's state
+- Self-programming = defining functions that become tools
+
+This inverts the typical relationship. Instead of "agent calls external MCP servers," it's "agent IS an MCP server that grows."
+
+### FastMCP + Reactive = Composable Self-Development
+
+Combine:
+1. **FastMCP**: Define tools via decoration
+2. **Reactive model**: Track dependencies between tools
+3. **REPL environment**: Live definition and testing
+
+Result: The agent can define a tool, see what depends on it, modify it, watch the cascade, and expose it to other agents—all in a live environment.
+
+---
+
+## Part 4: Implications for Self-Developing Coding Agents
+
+### What "Self-Development" Requires
+
+A self-developing agent must:
+1. **Perceive its own capabilities**: What can I do?
+2. **Identify gaps**: What can't I do that I need to?
+3. **Create new capabilities**: Write code that extends myself
+4. **Integrate capabilities**: Make new code available for use
+5. **Evaluate changes**: Did the new capability work?
+6. **Persist or revert**: Keep good changes, discard bad ones
+
+### How Each Paradigm Supports This
+
+#### Terminal/File Approach
+
+```
+Perceive: Read my source files
+Identify gaps: Compare task requirements to available functions
+Create: Write new function to a file
+Integrate: Import the new module (restart required)
+Evaluate: Run tests
+Persist/Revert: Git commit or git checkout
+```
+
+**Strengths**: Clear audit trail, standard tooling, language-agnostic
+**Weaknesses**: High friction, cold restart required, "self" is inert between runs
+
+#### REPL Approach
+
+```
+Perceive: dir(), inspect.getsource()
+Identify gaps: Compare task requirements to defined functions
+Create: def new_function(): ...
+Integrate: Immediate (it's just defined)
+Evaluate: Call it, see what happens
+Persist/Revert: Re-execute history, or lose it
+```
+
+**Strengths**: Immediate feedback, natural Python, low ceremony
+**Weaknesses**: Opaque state, no dependency tracking, weak persistence
+
+#### Reactive Notebook Approach
+
+```
+Perceive: View the DAG of cells
+Identify gaps: See which cells are stale or missing
+Create: New cell with new capability
+Integrate: Automatic (dependencies resolved)
+Evaluate: Cascade shows effects
+Persist/Revert: Cell versioning, branch/merge
+```
+
+**Strengths**: Structural visibility, predictable changes, native versioning
+**Weaknesses**: Novel paradigm (LLM training mismatch), functional constraints
+
+#### Hybrid: Reactive REPL + FastMCP
+
+```
+Perceive: Live symbol table + dependency DAG + tool registry
+Identify gaps: Compare available tools to task requirements
+Create: @tool-decorated function in REPL
+Integrate: Automatic (decorator registers, dependencies tracked)
+Evaluate: Cascade through dependents, test in isolated fork
+Persist/Revert: Cell versioning + checkpoint/restore
+```
+
+**This hybrid offers**:
+- REPL's cognitive alignment and immediacy
+- Reactive model's structural visibility and predictability
+- FastMCP's clean tool definition
+- First-class versioning and safe exploration
+
+### The Critical Insight: Representation Determines Capability
+
+The format in which an agent represents "itself" determines what self-modifications are tractable:
+
+| Representation | Easy Modifications | Hard Modifications |
+|----------------|-------------------|-------------------|
+| Files on disk | Add new files, edit text | Change running behavior, maintain state |
+| Runtime state | Redefine functions, update variables | Understand structure, track dependencies |
+| DAG of cells | Edit cells, watch cascade, version | Novel concepts LLM may not grok |
+| Tool registry | Add/remove tools, change schemas | Deep behavioral changes |
+
+**The most powerful self-development comes from combining representations**:
+- DAG for structure (what exists, what depends on what)
+- Runtime for immediacy (try it now, see what happens)
+- Tool registry for capability (what can I do, what can I expose)
+- File persistence for durability (survive restarts, share with others)
+
+---
+
+## Synthesis: Design Principles for Self-Developing Agents
+
+### 1. Make Structure Explicit
+The agent should see its own structure, not have to reconstruct it via introspection. A DAG, symbol table, or tool registry—something the agent can read directly.
+
+### 2. Support Non-Destructive Exploration
+Speculative execution, branching, checkpointing. The agent should be able to try things without fear of breaking its current state.
+
+### 3. Track Dependencies
+When the agent modifies something, it should know what else might be affected. Cascading or staleness marking—either way, the blast radius is visible.
+
+### 4. Enable Live Capability Definition
+FastMCP-style decoration: write a function, it becomes a capability. Minimal ceremony between "I need this" and "I have this."
+
+### 5. Version Everything
+Cell-level, function-level, session-level versioning. The agent can compare, revert, branch, merge. Self-development is an iterative process.
+
+### 6. Maintain Cognitive Alignment
+Despite adding structure, stay close to how LLMs think. Python over novel DSLs. Explicit over magical. The structure should help the LLM, not confuse it.
+
+---
+
+## Conclusion
+
+**REPL-first** (agentlib) is a significant advance over terminal-first because it treats the LLM as a programmer in a live environment, not an orchestrator of discrete tools.
+
+**Reactive notebooks** (marimo) offer a structural model—the DAG—that makes state visible, changes predictable, and versioning natural.
+
+**FastMCP** provides the ceremony-free tool definition that makes self-programming practical: write a function, decorate it, it's a capability.
+
+**For self-developing agents**, the synthesis is:
+- A REPL for cognitive alignment and immediacy
+- Reactive concepts for structural visibility and dependency tracking
+- FastMCP-style decoration for capability self-definition
+- First-class versioning for safe exploration
+
+The unexplored frontier is an agent interface that combines all four: a **versioned, dependency-aware, live-programming environment** where the agent can see its own structure, extend its own capabilities, and safely explore modifications.
+
+---
+
+## Sources
+
+- [FastMCP GitHub](https://github.com/jlowin/fastmcp) - Pythonic MCP framework
+- [Marimo Documentation](https://docs.marimo.io/) - Reactive notebook concepts
+- [Google Cloud MCP Announcement](https://cloud.google.com/blog/products/ai-machine-learning/announcing-official-mcp-support-for-google-services) - MCP ecosystem growth
