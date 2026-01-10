@@ -488,6 +488,180 @@ The format in which an agent represents "itself" determines what self-modificati
 
 ---
 
+## Part 6: Capability-Based Sandboxed Agent
+
+### The Core Insight: Constrained Power
+
+The previous sections explored REPL-first agents in the context of existing tools like agentlib. But what if we went further? What if we designed an agent architecture from first principles with **security and capability control** as the primary concerns?
+
+**The core constraint:**
+> The agent lives inside a very locked-down Python REPL. No access to the file system or the network. Just primitives and a few libraries.
+
+This is a deliberate inversion of typical agent design. Most agents start with full access and try to constrain behavior via prompts or guardrails. Here, we start with **nothing** and explicitly grant capabilities.
+
+### Capabilities as First-Class Objects
+
+In this model, **capabilities** are objects introduced into the REPL. Each capability:
+
+1. **Provides a self-documenting interface** — The agent can inspect the capability to understand what it offers
+2. **Encapsulates a domain of functionality** — File access, network access, tool execution, etc.
+3. **Can be composed** — Capabilities can depend on or extend other capabilities
+4. **Can be revoked** — Removing the object from the REPL removes the capability
+
+```python
+# Conceptual example: capability objects in the agent's REPL
+>>> file_cap.describe()
+FileCapability:
+  - read(path) -> str: Read file contents
+  - write(path, content) -> bool: Write to file
+  - list(pattern) -> list[str]: List files matching pattern
+  Permissions: read-only, restricted to /project/*
+
+>>> file_cap.read("/project/src/main.py")
+"def main(): ..."
+```
+
+### Capability Taxonomy
+
+**Core Capabilities:**
+
+| Capability | Description | Security Considerations |
+|------------|-------------|------------------------|
+| **Self-Source** | Read, modify, and experiment with own live source | Enables self-improvement; changes are ephemeral until committed |
+| **User Communication** | Communicate with the user | Essential for collaboration; may need rate limiting |
+| **File System** | Read, write files and directories | Scoped to specific paths; read vs write separately grantable |
+| **Command Line** | Execute shell commands | High risk; needs command allowlisting or sandboxing |
+| **Capability Discovery** | Search for and install other capabilities | Meta-capability; controls capability expansion |
+| **Task Tracking** | Track agent tasks and progress | Supports structured work; can be persisted |
+
+**Advanced Capabilities:**
+
+| Capability | Description | Security Considerations |
+|------------|-------------|------------------------|
+| **Sub-Agents** | Spawn and coordinate child agents | Delegation of work; resource limits needed |
+| **Parallel Execution** | Run multiple capability invocations in parallel | Performance optimization; needs synchronization |
+| **Background Execution** | Async or background capability execution | Long-running tasks; needs lifecycle management |
+
+### Permissioned Capability Execution
+
+**The key architectural insight:**
+
+> We can run the Python output by the LLM with **proxies first** to see what capabilities it is trying to use and with what arguments. Then request permission from the user for those capabilities with those arguments. Then run with the real capabilities.
+
+This creates a **two-phase execution model**:
+
+```
+Phase 1: Dry Run (Proxies)
+┌─────────────────────────────────────────┐
+│  LLM generates Python code              │
+│  ↓                                      │
+│  REPL executes with capability proxies  │
+│  ↓                                      │
+│  Proxies record: which caps, what args  │
+│  ↓                                      │
+│  Execution completes (no side effects)  │
+└─────────────────────────────────────────┘
+                   ↓
+┌─────────────────────────────────────────┐
+│  Request user permission:               │
+│  "Agent wants to:                       │
+│   - file_cap.write('/project/x.py', …) │
+│   - cmd_cap.run('npm test')             │
+│  Allow? [y/n/edit]"                     │
+└─────────────────────────────────────────┘
+                   ↓
+Phase 2: Real Execution (if permitted)
+┌─────────────────────────────────────────┐
+│  REPL re-executes with real capabilities│
+│  ↓                                      │
+│  Side effects occur                     │
+│  ↓                                      │
+│  Results available to agent             │
+└─────────────────────────────────────────┘
+```
+
+**Implementation approaches:**
+
+1. **Proxy Pattern**: Capability objects are wrappers that can operate in "record" or "execute" mode
+2. **AST Analysis**: Parse the LLM's code before execution to identify capability calls (less reliable for dynamic code)
+3. **Sandbox + Replay**: Execute in a fully isolated sandbox, then replay approved actions in the real environment
+
+### Relationship to Existing Standards
+
+**How does this relate to MCP, Claude Skills, and plugins?**
+
+| Concept | This Architecture | MCP | Claude Skills/Plugins |
+|---------|-------------------|-----|----------------------|
+| **What it is** | Objects in a sandboxed REPL | Protocol for tool servers | Agent-defined capabilities |
+| **Discovery** | Capability can describe itself | Server exposes tool schemas | Skills defined in markdown |
+| **Invocation** | Method call on capability object | JSON-RPC over stdio/HTTP | Tool call via JSON schema |
+| **Security** | Proxy-first permission model | Trust-based (trust the server) | Prompt-based guardrails |
+| **Composition** | Capabilities can hold other caps | Servers are independent | Skills are independent |
+
+**Key differences:**
+
+- **MCP** assumes you trust the server. Once connected, tools are available. Our model doesn't assume trust—each invocation can be gated.
+- **Claude Skills** are static definitions. Our capabilities are live objects that can evolve during a session.
+- **Plugins** typically add tools to an agent. Our model inverts this—the agent has nothing until capabilities are granted.
+
+**Potential synergies:**
+
+- MCP servers could be wrapped as capability objects
+- Skill definitions could initialize capability configurations
+- The permission model could layer atop MCP connections
+
+### Self-Modification via Capabilities
+
+The **Self-Source** capability deserves special attention:
+
+```python
+>>> self_cap.read_source()
+"class Agent:\n    def process(self, input): ..."
+
+>>> self_cap.modify("def process(self, input):\n    # new implementation")
+ModificationPending: Changes staged. Call commit() to persist.
+
+>>> self_cap.test_modification()
+Testing with modified source...
+✓ All tests pass
+
+>>> self_cap.commit()
+Changes written to _generations/v1.py
+```
+
+This connects back to the hybrid model from Part 0:
+- **Runtime modifications** happen via the Self-Source capability
+- **Persistence** happens via commit (dehydration to source files)
+- **Versioning** integrates with git
+
+### Design Principles for Capability-Based Agents
+
+1. **Deny by Default**: The REPL starts with nothing. Every capability is an explicit grant.
+
+2. **Self-Documenting Interfaces**: Each capability can describe what it offers. The agent doesn't need external documentation.
+
+3. **Granular Permissions**: Capabilities can be scoped (read vs write, specific paths, allowlisted commands).
+
+4. **Two-Phase Execution**: Proxy-first for permission checking; real execution only after approval.
+
+5. **Composable Capabilities**: Capabilities can depend on each other, enabling higher-order abstractions.
+
+6. **Revocable Access**: Removing a capability object from the REPL removes access. No residual permissions.
+
+### Open Questions
+
+1. **Capability discovery**: How does an agent learn what capabilities exist? A registry? Another capability?
+
+2. **Capability versioning**: When capabilities change, how does the agent adapt?
+
+3. **Cross-session capabilities**: Should capability grants persist across sessions?
+
+4. **Capability inheritance**: Can one capability extend another? What does that mean for permissions?
+
+5. **Multi-agent capability sharing**: How do agents share or delegate capabilities?
+
+---
+
 ## Synthesis: Design Principles for Self-Developing Agents
 
 ### 1. Make Structure Explicit
