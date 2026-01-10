@@ -499,166 +499,374 @@ The previous sections explored REPL-first agents in the context of existing tool
 
 This is a deliberate inversion of typical agent design. Most agents start with full access and try to constrain behavior via prompts or guardrails. Here, we start with **nothing** and explicitly grant capabilities.
 
-### Capabilities as First-Class Objects
+---
 
-In this model, **capabilities** are objects introduced into the REPL. Each capability:
+### The Capability Protocol
 
-1. **Provides a self-documenting interface** — The agent can inspect the capability to understand what it offers
-2. **Encapsulates a domain of functionality** — File access, network access, tool execution, etc.
-3. **Can be composed** — Capabilities can depend on or extend other capabilities
-4. **Can be revoked** — Removing the object from the REPL removes the capability
+A capability is more than a collection of methods—it's a **runtime object** with a well-defined interface:
 
 ```python
-# Conceptual example: capability objects in the agent's REPL
->>> file_cap.describe()
-FileCapability:
-  - read(path) -> str: Read file contents
-  - write(path, content) -> bool: Write to file
-  - list(pattern) -> list[str]: List files matching pattern
-  Permissions: read-only, restricted to /project/*
+class Capability(Protocol):
+    """The contract all capabilities must fulfill."""
 
->>> file_cap.read("/project/src/main.py")
-"def main(): ..."
+    name: str
+    """Unique identifier for this capability."""
+
+    description: str
+    """Human-readable description."""
+
+    def describe(self) -> str:
+        """Self-documenting interface showing all available methods."""
+        ...
+
+    def contract(self) -> CapabilityContract:
+        """Declare what side effects this capability might produce."""
+        ...
+
+    def derive(self, restrictions: Restrictions) -> 'Capability':
+        """Create a more restricted version of this capability."""
+        ...
 ```
+
+**The essential distinction from other abstractions:**
+
+| Concept | Essential Nature |
+|---------|-----------------|
+| **MCP Tool** | A *remote procedure* — stateless, external, called via protocol |
+| **Claude Skill** | A *prompt template* — instructions that shape behavior |
+| **Capability** | A *runtime object* — stateful, composable, revocable, in-process |
+
+Capabilities are **objects in the agent's memory**, not external services or static instructions. This enables:
+- **Composition**: `SecureFileCap(base_cap, allowed_paths=[...])`
+- **Revocation**: `del file_cap` removes access
+- **Evolution**: Capability objects can update themselves during a session
+
+---
+
+### Capability Contracts
+
+The **contract** is how a capability declares what it *might* do, enabling pre-approval without runtime proxying:
+
+```python
+@dataclass
+class CapabilityContract:
+    """What a capability declares it might do."""
+
+    reads: list[str] = field(default_factory=list)
+    """Resources this capability might read (e.g., ["file:*.py", "env:HOME"])"""
+
+    writes: list[str] = field(default_factory=list)
+    """Resources this capability might modify (e.g., ["file:src/*"])"""
+
+    executes: list[str] = field(default_factory=list)
+    """Commands/actions this capability might execute (e.g., ["shell:git *"])"""
+
+    network: list[str] = field(default_factory=list)
+    """Network resources accessed (e.g., ["https://api.example.com/*"])"""
+
+    spawns: bool = False
+    """Whether this capability might create sub-capabilities or agents."""
+```
+
+**Why contracts matter**: The two-phase proxy model (execute with proxies, then re-execute for real) has a fundamental flaw—code with control flow depending on capability results can't be accurately recorded. Contracts solve this by letting capabilities declare upfront what they *might* do, enabling **contract-based approval** rather than call-by-call approval.
+
+---
 
 ### Capability Taxonomy
 
 **Core Capabilities:**
 
-| Capability | Description | Security Considerations |
-|------------|-------------|------------------------|
-| **Self-Source** | Read, modify, and experiment with own live source | Enables self-improvement; changes are ephemeral until committed |
-| **User Communication** | Communicate with the user | Essential for collaboration; may need rate limiting |
-| **File System** | Read, write files and directories | Scoped to specific paths; read vs write separately grantable |
-| **Command Line** | Execute shell commands | High risk; needs command allowlisting or sandboxing |
-| **Capability Discovery** | Search for and install other capabilities | Meta-capability; controls capability expansion |
-| **Task Tracking** | Track agent tasks and progress | Supports structured work; can be persisted |
+| Capability | Description | Contract Summary |
+|------------|-------------|-----------------|
+| **Self-Source** | Read, modify, and experiment with own live source | reads: `["self:*"]`, writes: `["self:staged/*"]` |
+| **User Communication** | Communicate with the user | reads: `[]`, writes: `["user:output"]` |
+| **File System** | Read, write files and directories | reads/writes: configurable paths |
+| **Command Line** | Execute shell commands | executes: configurable command patterns |
+| **Capability Loader** | Discover and install other capabilities | spawns: `true` |
+| **Task Tracking** | Track agent tasks and progress | writes: `["session:tasks"]` |
 
 **Advanced Capabilities:**
 
-| Capability | Description | Security Considerations |
-|------------|-------------|------------------------|
-| **Sub-Agents** | Spawn and coordinate child agents | Delegation of work; resource limits needed |
-| **Parallel Execution** | Run multiple capability invocations in parallel | Performance optimization; needs synchronization |
-| **Background Execution** | Async or background capability execution | Long-running tasks; needs lifecycle management |
+| Capability | Description | Contract Summary |
+|------------|-------------|-----------------|
+| **Sub-Agents** | Spawn and coordinate child agents | spawns: `true`, inherits parent contracts |
+| **Parallel Execution** | Run multiple capability invocations in parallel | inherits from composed capabilities |
+| **Capability Factory** | Create new capabilities at runtime | spawns: `true`, writes: `["capabilities:*"]` |
 
-### Permissioned Capability Execution
+---
 
-**The key architectural insight:**
+### Permission Strategies
 
-> We can run the Python output by the LLM with **proxies first** to see what capabilities it is trying to use and with what arguments. Then request permission from the user for those capabilities with those arguments. Then run with the real capabilities.
+Not one model fits all contexts. Multiple permission strategies, selected per-capability or per-session:
 
-This creates a **two-phase execution model**:
+| Strategy | When to Use | User Experience |
+|----------|-------------|-----------------|
+| **Pre-approved** | User trusts this capability entirely | No prompts, all calls allowed |
+| **Contract-based** | User approves the contract upfront | One-time approval, calls matching contract auto-allowed |
+| **Call-by-call** | High-risk operations, untrusted capabilities | Each invocation prompts for approval |
+| **Budget-based** | Limit scope without constant prompting | "You can write up to 10 files" — depleting budget |
+| **Audit-only** | High-trust contexts, post-hoc review | Execute immediately, log for review |
 
-```
-Phase 1: Dry Run (Proxies)
-┌─────────────────────────────────────────┐
-│  LLM generates Python code              │
-│  ↓                                      │
-│  REPL executes with capability proxies  │
-│  ↓                                      │
-│  Proxies record: which caps, what args  │
-│  ↓                                      │
-│  Execution completes (no side effects)  │
-└─────────────────────────────────────────┘
-                   ↓
-┌─────────────────────────────────────────┐
-│  Request user permission:               │
-│  "Agent wants to:                       │
-│   - file_cap.write('/project/x.py', …) │
-│   - cmd_cap.run('npm test')             │
-│  Allow? [y/n/edit]"                     │
-└─────────────────────────────────────────┘
-                   ↓
-Phase 2: Real Execution (if permitted)
-┌─────────────────────────────────────────┐
-│  REPL re-executes with real capabilities│
-│  ↓                                      │
-│  Side effects occur                     │
-│  ↓                                      │
-│  Results available to agent             │
-└─────────────────────────────────────────┘
+```python
+class PermissionStrategy(Enum):
+    PRE_APPROVED = "pre_approved"
+    CONTRACT_BASED = "contract_based"
+    CALL_BY_CALL = "call_by_call"
+    BUDGET_BASED = "budget_based"
+    AUDIT_ONLY = "audit_only"
 ```
 
-**Implementation approaches:**
+**The two-phase model** (proxy-first) is the implementation of `CALL_BY_CALL`. For most use cases, `CONTRACT_BASED` is the sweet spot—approve what a capability *can* do, not every individual call.
 
-1. **Proxy Pattern**: Capability objects are wrappers that can operate in "record" or "execute" mode
-2. **AST Analysis**: Parse the LLM's code before execution to identify capability calls (less reliable for dynamic code)
-3. **Sandbox + Replay**: Execute in a fully isolated sandbox, then replay approved actions in the real environment
+---
+
+### The Bootstrapping Problem: CapabilityLoader
+
+If the agent starts with *nothing*, how does it get capabilities?
+
+The **CapabilityLoader** is a meta-capability that's always present—the minimal trusted base:
+
+```python
+class CapabilityLoader(Capability):
+    """The one capability that exists from the start.
+
+    Analogous to a kernel—it mediates access to everything else.
+    """
+
+    name = "loader"
+    description = "Discover and install capabilities into the sandbox."
+
+    def list_available(self) -> list[CapabilityManifest]:
+        """What capabilities can be installed?"""
+        ...
+
+    def describe_available(self, name: str) -> CapabilityContract:
+        """Get the contract for a capability before installing."""
+        ...
+
+    def install(
+        self,
+        name: str,
+        restrictions: Restrictions | None = None,
+    ) -> Capability:
+        """Install a capability (requires user approval of its contract).
+
+        Returns the installed capability object.
+        """
+        ...
+
+    def uninstall(self, name: str) -> bool:
+        """Remove a capability from the environment."""
+        ...
+
+    def list_installed(self) -> list[str]:
+        """What capabilities are currently installed?"""
+        ...
+```
+
+**The approval flow for installing a new capability:**
+
+```
+Agent: loader.install("web_fetch")
+        ↓
+System: Show user the contract for web_fetch:
+        "WebFetchCapability requests:
+         - network: https://*
+         - reads: response bodies
+         Approve? [y/n/restrict]"
+        ↓
+User: "y" (or configures restrictions)
+        ↓
+System: Capability installed, available as `web` in sandbox
+```
+
+---
+
+### Self-Development via Capabilities
+
+The **CapabilityFactory** is where self-improvement meets the capability model:
+
+```python
+class CapabilityFactory(Capability):
+    """Create new capabilities at runtime.
+
+    The agent can extend itself by writing new capabilities.
+    """
+
+    name = "factory"
+    description = "Create and test new capabilities."
+
+    def create(self, name: str, source: str) -> str:
+        """Stage a new capability from source code.
+
+        The capability is compiled and validated but not yet installed.
+        """
+        ...
+
+    def test(self, name: str) -> TestResult:
+        """Test a staged capability by instantiating it."""
+        ...
+
+    def install(self, name: str) -> Capability:
+        """Install a staged capability into the sandbox."""
+        ...
+
+    def commit(self, name: str) -> str:
+        """Persist a capability to disk for future sessions."""
+        ...
+```
+
+**The self-development loop:**
+
+1. Agent encounters a problem it can't solve with existing capabilities
+2. Agent uses `factory.create()` to write a new capability
+3. Agent uses `factory.test()` to verify it works
+4. Agent uses `factory.install()` to make it available in the current session
+5. Agent uses `factory.commit()` to persist it for future sessions
+
+```python
+# Example: Agent creates a domain-specific capability
+factory.create("json_schema", '''
+class JsonSchemaCapability(Capability):
+    """Validate JSON against schemas."""
+
+    name = "json_schema"
+    description = "Validate JSON data against JSON Schema specifications."
+
+    def validate(self, data: dict, schema: dict) -> ValidationResult:
+        """Validate data against a JSON schema."""
+        import jsonschema  # Available in sandbox's allowed imports
+        try:
+            jsonschema.validate(data, schema)
+            return ValidationResult(valid=True)
+        except jsonschema.ValidationError as e:
+            return ValidationResult(valid=False, error=str(e))
+''')
+
+factory.test("json_schema")  # Verify it works
+factory.install("json_schema")  # Now available as `json_schema` in sandbox
+factory.commit("json_schema")  # Saved to src/agentself/capabilities/json_schema.py
+```
+
+---
+
+### Capability Packaging and Distribution
+
+For the **marketplace vision**—capabilities that can be published, discovered, and installed:
+
+```
+capability-package/
+├── manifest.yaml          # Metadata, dependencies, contract
+├── capability.py          # The implementation
+├── tests/                 # Verification tests
+└── README.md              # Documentation
+```
+
+**manifest.yaml:**
+```yaml
+name: web_fetch
+version: 1.2.0
+author: example@example.com
+description: Fetch and parse web content
+
+contract:
+  network:
+    - "https://*"
+    - "http://*"
+  reads:
+    - "response:body"
+    - "response:headers"
+
+dependencies:
+  - httpx>=0.24.0
+
+permissions:
+  minimum: contract_based
+  recommended: pre_approved
+```
+
+**Trust model for distributed capabilities:**
+- **Signed by author** (identity verification)
+- **Verified by registry** (safety scan, contract accuracy)
+- **Reputation score** (community trust)
+- **Permission audit** (what it declares vs. what it does)
+
+---
 
 ### Relationship to Existing Standards
 
-**How does this relate to MCP, Claude Skills, and plugins?**
+**How capabilities relate to MCP, Claude Skills, and plugins:**
 
-| Concept | This Architecture | MCP | Claude Skills/Plugins |
-|---------|-------------------|-----|----------------------|
-| **What it is** | Objects in a sandboxed REPL | Protocol for tool servers | Agent-defined capabilities |
-| **Discovery** | Capability can describe itself | Server exposes tool schemas | Skills defined in markdown |
-| **Invocation** | Method call on capability object | JSON-RPC over stdio/HTTP | Tool call via JSON schema |
-| **Security** | Proxy-first permission model | Trust-based (trust the server) | Prompt-based guardrails |
-| **Composition** | Capabilities can hold other caps | Servers are independent | Skills are independent |
+| Aspect | Capabilities | MCP | Claude Skills |
+|--------|-------------|-----|---------------|
+| **Runtime nature** | In-process objects | External servers | Prompt templates |
+| **State** | Can maintain state | Stateless calls | No runtime state |
+| **Security model** | Contract + permission strategy | Trust the server | Prompt guardrails |
+| **Composition** | First-class (wrap, derive) | Independent servers | Independent skills |
+| **Evolution** | Can modify during session | Static per connection | Static definitions |
+| **Self-creation** | Agent can create new ones | No | No |
 
-**Key differences:**
+**Capabilities are a superset**: MCP servers can be wrapped as capabilities. Skills can initialize capability configurations. The permission model can layer atop MCP connections.
 
-- **MCP** assumes you trust the server. Once connected, tools are available. Our model doesn't assume trust—each invocation can be gated.
-- **Claude Skills** are static definitions. Our capabilities are live objects that can evolve during a session.
-- **Plugins** typically add tools to an agent. Our model inverts this—the agent has nothing until capabilities are granted.
+---
 
-**Potential synergies:**
+### Honest Limitations
 
-- MCP servers could be wrapped as capability objects
-- Skill definitions could initialize capability configurations
-- The permission model could layer atop MCP connections
-
-### Self-Modification via Capabilities
-
-The **Self-Source** capability deserves special attention:
+**The proxy model's fundamental constraint:**
 
 ```python
->>> self_cap.read_source()
-"class Agent:\n    def process(self, input): ..."
-
->>> self_cap.modify("def process(self, input):\n    # new implementation")
-ModificationPending: Changes staged. Call commit() to persist.
-
->>> self_cap.test_modification()
-Testing with modified source...
-✓ All tests pass
-
->>> self_cap.commit()
-Changes written to _generations/v1.py
+# This can't be accurately recorded in proxy mode:
+if fs.exists(path):
+    content = fs.read(path)
+    process(content)
 ```
 
-This connects back to the hybrid model from Part 0:
-- **Runtime modifications** happen via the Self-Source capability
-- **Persistence** happens via commit (dehydration to source files)
-- **Versioning** integrates with git
+If `exists()` returns nothing in proxy mode, execution can't continue. If it returns mock `True`, you get a different path than if it returns `False`.
 
-### Design Principles for Capability-Based Agents
+**Solutions we're exploring:**
+1. **Contract-based approval** — Approve what a capability *can* do, not each call
+2. **Speculative execution** — Fork sandbox, run both branches, record both
+3. **Symbolic values** — Track which paths depend on capability results
+4. **Accept the limitation** — Call-by-call only for straight-line code
 
-1. **Deny by Default**: The REPL starts with nothing. Every capability is an explicit grant.
+**What this architecture can't do well:**
+- Capabilities with complex internal state that can't be easily serialized
+- Operations that require true atomicity across multiple capability calls
+- Ultra-low-latency scenarios (permission checking adds overhead)
 
-2. **Self-Documenting Interfaces**: Each capability can describe what it offers. The agent doesn't need external documentation.
+---
 
-3. **Granular Permissions**: Capabilities can be scoped (read vs write, specific paths, allowlisted commands).
+### Design Principles
 
-4. **Two-Phase Execution**: Proxy-first for permission checking; real execution only after approval.
+1. **Deny by Default**: The sandbox starts empty. Every capability is an explicit grant.
 
-5. **Composable Capabilities**: Capabilities can depend on each other, enabling higher-order abstractions.
+2. **Contracts Over Proxies**: Capabilities declare what they *might* do. Approve contracts, not individual calls.
 
-6. **Revocable Access**: Removing a capability object from the REPL removes access. No residual permissions.
+3. **Self-Documenting**: Each capability can describe itself. The agent doesn't need external documentation.
 
-### Open Questions
+4. **Composable and Derivable**: `fs.derive(read_only=True)` creates a restricted version.
 
-1. **Capability discovery**: How does an agent learn what capabilities exist? A registry? Another capability?
+5. **Revocable**: Removing a capability object removes access. No residual permissions.
 
-2. **Capability versioning**: When capabilities change, how does the agent adapt?
+6. **Self-Extensible**: The agent can create new capabilities via CapabilityFactory.
 
-3. **Cross-session capabilities**: Should capability grants persist across sessions?
+7. **Packageable**: Capabilities can be versioned, signed, and distributed.
 
-4. **Capability inheritance**: Can one capability extend another? What does that mean for permissions?
+---
 
-5. **Multi-agent capability sharing**: How do agents share or delegate capabilities?
+### Open Questions (Refined)
+
+1. **Contract verification**: How do we ensure a capability's actual behavior matches its declared contract?
+
+2. **Capability versioning**: When a capability updates, how do existing approvals translate?
+
+3. **Cross-agent delegation**: Can an agent pass a restricted version of its capability to a sub-agent?
+
+4. **Capability conflict**: What if two capabilities have overlapping contracts?
+
+5. **Offline capabilities**: Can capabilities work without network access to the registry?
+
+6. **Audit and compliance**: How do we generate audit logs for regulated environments?
 
 ---
 

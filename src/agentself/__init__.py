@@ -3,12 +3,16 @@
 This package provides:
 - A sandboxed execution environment with two-phase execution
 - A capability system for controlled access to external resources
+- Capability contracts for declaring potential side effects
 - Permission handling for human-in-the-loop oversight
 - Self-modification capabilities for runtime agent improvement
+- A capability loader for discovering and installing capabilities
 
 Key Components:
 - Sandbox: Restricted Python execution with capability injection
 - Capability: Base class for controlled resource access
+- CapabilityContract: Declares what a capability might do
+- CapabilityLoader: Meta-capability for installing other capabilities
 - SandboxedAgent: LLM-powered agent with code execution
 - Permission handlers: Auto-approve, interactive, policy-based
 
@@ -28,6 +32,8 @@ from agentself.agent import (
 )
 from agentself.capabilities import (
     Capability,
+    CapabilityLoader,
+    CapabilityManifest,
     CommandLineCapability,
     FileSystemCapability,
     SelfSourceCapability,
@@ -35,10 +41,12 @@ from agentself.capabilities import (
 )
 from agentself.core import (
     CapabilityCall,
+    CapabilityContract,
     DependencyInfo,
     ExecutionMode,
     ExecutionPlan,
     ExecutionResult,
+    PermissionStrategy,
 )
 from agentself.permissions import (
     AutoApproveHandler,
@@ -74,12 +82,16 @@ __all__ = [
     "SAFE_BUILTINS",
     # Core types
     "CapabilityCall",
+    "CapabilityContract",
     "ExecutionPlan",
     "ExecutionResult",
     "ExecutionMode",
+    "PermissionStrategy",
     "DependencyInfo",
     # Capabilities
     "Capability",
+    "CapabilityLoader",
+    "CapabilityManifest",
     "FileSystemCapability",
     "CommandLineCapability",
     "UserCommunicationCapability",

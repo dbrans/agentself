@@ -8,30 +8,42 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
+
+from agentself.capabilities.base import Capability
+
+if TYPE_CHECKING:
+    from agentself.core import CapabilityContract
 
 
 @dataclass
 class PendingQuestion:
     """A question waiting for user response."""
+
     question: str
     callback: Callable[[str], None] | None = None
 
 
-from agentself.capabilities.base import Capability
-
-
 class UserCommunicationCapability(Capability):
     """Communicate with the user (output queue, input queue)."""
-    
+
     name = "user"
     description = "Communicate with the user via messages and questions."
-    
+
     def __init__(self):
         """Initialize with empty message queues."""
         self._output_queue: deque[str] = deque()
         self._pending_questions: deque[PendingQuestion] = deque()
         self._responses: dict[str, str] = {}
+
+    def contract(self) -> "CapabilityContract":
+        """Declare what this capability might do."""
+        from agentself.core import CapabilityContract
+
+        return CapabilityContract(
+            reads=["user:input"],
+            writes=["user:output"],
+        )
     
     def say(self, message: str) -> None:
         """Send a message to the user.

@@ -9,18 +9,22 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, TYPE_CHECKING
 
 from agentself.capabilities.base import Capability
+
+if TYPE_CHECKING:
+    from agentself.core import CapabilityContract
 
 
 @dataclass
 class CommandResult:
     """Result of a command execution."""
+
     exit_code: int
     stdout: str
     stderr: str
-    
+
     def __str__(self) -> str:
         """Format as readable output."""
         parts = []
@@ -34,10 +38,10 @@ class CommandResult:
 
 class CommandLineCapability(Capability):
     """Execute shell commands with optional allowlist."""
-    
+
     name = "cmd"
     description = "Execute shell commands (with optional allowlist)."
-    
+
     def __init__(
         self,
         allowed_commands: list[str] | None = None,
@@ -45,7 +49,7 @@ class CommandLineCapability(Capability):
         timeout: int = 30,
     ):
         """Initialize command line capability.
-        
+
         Args:
             allowed_commands: List of allowed command prefixes (e.g., ["git", "npm"]).
                             If None, all commands are allowed.
@@ -56,6 +60,46 @@ class CommandLineCapability(Capability):
         self.allowed_commands = allowed_commands
         self.allowed_cwd = [Path(p).resolve() for p in (allowed_cwd or [])]
         self.timeout = timeout
+
+    def contract(self) -> "CapabilityContract":
+        """Declare what this capability might do."""
+        from agentself.core import CapabilityContract
+
+        # Build command patterns from allowlist
+        if self.allowed_commands:
+            exec_patterns = [f"shell:{cmd} *" for cmd in self.allowed_commands]
+        else:
+            exec_patterns = ["shell:*"]
+
+        return CapabilityContract(
+            executes=exec_patterns,
+        )
+
+    def derive(self, **restrictions) -> "CommandLineCapability":
+        """Create a more restricted version.
+
+        Args:
+            allowed_commands: Restrict to these commands (must be subset of current).
+            allowed_cwd: Restrict to these directories.
+            timeout: Set a shorter timeout.
+        """
+        new_commands = restrictions.get("allowed_commands", self.allowed_commands)
+        new_cwd = restrictions.get("allowed_cwd", self.allowed_cwd)
+        new_timeout = restrictions.get("timeout", self.timeout)
+
+        # Ensure new commands are subset of current commands
+        if self.allowed_commands and new_commands:
+            new_commands = [c for c in new_commands if c in self.allowed_commands]
+
+        # Timeout can only be shorter
+        if self.timeout:
+            new_timeout = min(new_timeout, self.timeout)
+
+        return CommandLineCapability(
+            allowed_commands=new_commands,
+            allowed_cwd=new_cwd or self.allowed_cwd,
+            timeout=new_timeout,
+        )
     
     def _is_command_allowed(self, command: str) -> bool:
         """Check if a command is in the allowlist."""

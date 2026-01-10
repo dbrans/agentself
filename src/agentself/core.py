@@ -1,14 +1,17 @@
 """Core abstractions for the capability-based agent system.
 
 This module defines the fundamental types used throughout the system:
+- CapabilityContract: What a capability declares it might do
 - CapabilityCall: A recorded call to a capability method
 - ExecutionPlan: The result of analyzing code before execution
 - ExecutionResult: The result of actually executing code
 - ExecutionMode: Whether we're recording or executing
+- PermissionStrategy: How to handle permission for a capability
 """
 
 from __future__ import annotations
 
+import fnmatch
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -23,6 +26,159 @@ class ExecutionMode(Enum):
 
     EXECUTE = "execute"
     """Use real capabilities, side effects occur."""
+
+
+class PermissionStrategy(Enum):
+    """How to handle permission checking for a capability.
+
+    Different strategies offer different trade-offs between security and usability.
+    """
+
+    PRE_APPROVED = "pre_approved"
+    """User trusts this capability entirely. All calls auto-allowed."""
+
+    CONTRACT_BASED = "contract_based"
+    """User approves the contract upfront. Calls matching contract auto-allowed."""
+
+    CALL_BY_CALL = "call_by_call"
+    """Each invocation prompts for approval (the proxy model)."""
+
+    BUDGET_BASED = "budget_based"
+    """Limited scope without constant prompting (e.g., 'up to 10 file writes')."""
+
+    AUDIT_ONLY = "audit_only"
+    """Execute immediately, log for review. High-trust contexts only."""
+
+
+@dataclass
+class CapabilityContract:
+    """What a capability declares it might do.
+
+    Contracts enable pre-approval: the user approves what a capability *can* do
+    upfront, rather than approving each individual call. This solves the
+    fundamental limitation of proxy-based call-by-call approval, where code
+    with control flow depending on capability results can't be accurately recorded.
+
+    Resource patterns use a simple glob-like syntax:
+    - "file:*.py" - any Python file
+    - "file:src/**" - anything under src/
+    - "shell:git *" - any git command
+    - "https://api.example.com/*" - any URL under that domain
+
+    Example:
+        contract = CapabilityContract(
+            reads=["file:*.py", "file:*.md"],
+            writes=["file:src/**"],
+            executes=["shell:git *", "shell:pytest *"],
+        )
+    """
+
+    reads: list[str] = field(default_factory=list)
+    """Resources this capability might read (e.g., ["file:*.py", "env:HOME"])."""
+
+    writes: list[str] = field(default_factory=list)
+    """Resources this capability might modify (e.g., ["file:src/*"])."""
+
+    executes: list[str] = field(default_factory=list)
+    """Commands/actions this capability might execute (e.g., ["shell:git *"])."""
+
+    network: list[str] = field(default_factory=list)
+    """Network resources accessed (e.g., ["https://api.example.com/*"])."""
+
+    spawns: bool = False
+    """Whether this capability might create sub-capabilities or agents."""
+
+    def __str__(self) -> str:
+        """Human-readable summary of the contract."""
+        parts = []
+        if self.reads:
+            parts.append(f"reads: {self.reads}")
+        if self.writes:
+            parts.append(f"writes: {self.writes}")
+        if self.executes:
+            parts.append(f"executes: {self.executes}")
+        if self.network:
+            parts.append(f"network: {self.network}")
+        if self.spawns:
+            parts.append("spawns: true")
+        return ", ".join(parts) if parts else "(no effects declared)"
+
+    def covers(self, resource_type: str, resource: str) -> bool:
+        """Check if this contract covers a specific resource.
+
+        Args:
+            resource_type: One of "reads", "writes", "executes", "network".
+            resource: The specific resource to check (e.g., "file:src/main.py").
+
+        Returns:
+            True if the contract allows access to this resource.
+        """
+        patterns = getattr(self, resource_type, [])
+        return any(self._matches_pattern(pattern, resource) for pattern in patterns)
+
+    def _matches_pattern(self, pattern: str, resource: str) -> bool:
+        """Check if a resource matches a pattern.
+
+        Supports glob-style patterns:
+        - "*" matches any single path component
+        - "**" matches any number of path components
+        """
+        # Handle ** by converting to fnmatch-compatible pattern
+        fnmatch_pattern = pattern.replace("**", "*")
+        return fnmatch.fnmatch(resource, fnmatch_pattern)
+
+    def merge(self, other: "CapabilityContract") -> "CapabilityContract":
+        """Merge two contracts, taking the union of all permissions.
+
+        Useful when composing capabilities.
+        """
+        return CapabilityContract(
+            reads=list(set(self.reads + other.reads)),
+            writes=list(set(self.writes + other.writes)),
+            executes=list(set(self.executes + other.executes)),
+            network=list(set(self.network + other.network)),
+            spawns=self.spawns or other.spawns,
+        )
+
+    def restrict(self, restrictions: "CapabilityContract") -> "CapabilityContract":
+        """Create a new contract that is the intersection with restrictions.
+
+        Useful when deriving a more restricted capability.
+        """
+        # For simplicity, take the more restrictive patterns
+        # A full implementation would compute actual intersections
+        return CapabilityContract(
+            reads=[r for r in self.reads if r in restrictions.reads] or self.reads,
+            writes=[w for w in self.writes if w in restrictions.writes] or [],
+            executes=[e for e in self.executes if e in restrictions.executes] or [],
+            network=[n for n in self.network if n in restrictions.network] or [],
+            spawns=self.spawns and restrictions.spawns,
+        )
+
+    def is_subset_of(self, other: "CapabilityContract") -> bool:
+        """Check if this contract's permissions are a subset of another's.
+
+        Useful for verifying that a derived capability doesn't exceed
+        the parent's permissions.
+        """
+        # Simplified check - a full implementation would handle pattern matching
+        if self.spawns and not other.spawns:
+            return False
+
+        for resource in self.reads:
+            if not other.covers("reads", resource):
+                return False
+        for resource in self.writes:
+            if not other.covers("writes", resource):
+                return False
+        for resource in self.executes:
+            if not other.covers("executes", resource):
+                return False
+        for resource in self.network:
+            if not other.covers("network", resource):
+                return False
+
+        return True
 
 
 @dataclass

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any, Type
 from agentself.capabilities.base import Capability
 
 if TYPE_CHECKING:
+    from agentself.core import CapabilityContract
     from agentself.sandbox import Sandbox
 
 
@@ -95,6 +96,16 @@ from agentself.capabilities.base import Capability
         self._source_dir = source_dir or Path("src/agentself")
         self._staged_capabilities: dict[str, CapabilityChange] = {}
         self._original_sources: dict[str, str] = {}
+
+    def contract(self) -> "CapabilityContract":
+        """Declare what this capability might do."""
+        from agentself.core import CapabilityContract
+
+        return CapabilityContract(
+            reads=["self:*", f"file:{self._source_dir}/**"],
+            writes=["self:staged/*", f"file:{self._source_dir}/capabilities/**"],
+            spawns=True,  # Can create new capabilities
+        )
 
     # =========================================================================
     # Introspection: Understanding the current state

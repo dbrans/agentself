@@ -6,10 +6,11 @@ from pathlib import Path
 import pytest
 
 from agentself.capabilities.base import Capability
-from agentself.capabilities.file_system import FileSystemCapability
-from agentself.capabilities.user_communication import UserCommunicationCapability
 from agentself.capabilities.command_line import CommandLineCapability, CommandResult
+from agentself.capabilities.file_system import FileSystemCapability
+from agentself.capabilities.loader import CapabilityLoader, CapabilityManifest
 from agentself.capabilities.self_source import SelfSourceCapability
+from agentself.capabilities.user_communication import UserCommunicationCapability
 from agentself.sandbox import Sandbox
 
 
@@ -21,7 +22,7 @@ class TestCapabilityBase:
         cap = FileSystemCapability()
         desc = cap.describe()
 
-        assert "file_system" in desc
+        assert "fs" in desc  # Capability name
         assert "Read and write files" in desc
 
     def test_describe_lists_methods(self):
@@ -39,7 +40,7 @@ class TestCapabilityBase:
         rep = repr(cap)
 
         assert "FileSystemCapability" in rep
-        assert "file_system" in rep
+        assert "fs" in rep  # Capability name
 
 
 class TestFileSystemCapability:
@@ -495,3 +496,230 @@ class TestSelfSourceCapabilityDescribe:
 
         # Persistence
         assert "commit_capability" in desc
+
+
+class TestCapabilityLoader:
+    """Tests for CapabilityLoader."""
+
+    def test_list_available_shows_builtins(self):
+        """Test that list_available shows built-in capabilities."""
+        sandbox = Sandbox()
+        loader = CapabilityLoader(sandbox=sandbox)
+
+        available = loader.list_available()
+
+        assert "fs" in available
+        assert "cmd" in available
+        assert "user" in available
+        assert "self" in available
+
+    def test_describe_available_returns_description(self):
+        """Test describe_available returns capability info."""
+        sandbox = Sandbox()
+        loader = CapabilityLoader(sandbox=sandbox)
+
+        desc = loader.describe_available("fs")
+
+        assert "FileSystemCapability" in desc
+        assert "Contract:" in desc
+
+    def test_describe_available_unknown_returns_error(self):
+        """Test describe_available handles unknown capability."""
+        sandbox = Sandbox()
+        loader = CapabilityLoader(sandbox=sandbox)
+
+        desc = loader.describe_available("unknown")
+
+        assert "Unknown capability" in desc
+
+    def test_install_adds_capability_to_sandbox(self):
+        """Test install adds capability to sandbox."""
+        sandbox = Sandbox()
+        loader = CapabilityLoader(sandbox=sandbox)
+        sandbox.inject_capability("loader", loader)
+
+        assert "fs" not in sandbox.capabilities
+
+        result = loader.install("fs")
+
+        assert "fs" in sandbox.capabilities
+        assert isinstance(result, FileSystemCapability)
+
+    def test_install_with_kwargs(self):
+        """Test install passes kwargs to capability."""
+        sandbox = Sandbox()
+        loader = CapabilityLoader(sandbox=sandbox)
+        sandbox.inject_capability("loader", loader)
+
+        result = loader.install("fs", read_only=True)
+
+        assert isinstance(result, FileSystemCapability)
+        assert result.read_only is True
+
+    def test_install_already_installed_returns_error(self):
+        """Test installing already installed capability returns error."""
+        sandbox = Sandbox(capabilities={"fs": FileSystemCapability()})
+        loader = CapabilityLoader(sandbox=sandbox)
+
+        result = loader.install("fs")
+
+        assert "already installed" in str(result)
+
+    def test_list_installed_shows_current_capabilities(self):
+        """Test list_installed shows sandbox capabilities."""
+        sandbox = Sandbox(capabilities={
+            "fs": FileSystemCapability(),
+            "user": UserCommunicationCapability(),
+        })
+        loader = CapabilityLoader(sandbox=sandbox)
+
+        installed = loader.list_installed()
+
+        assert "fs" in installed
+        assert "user" in installed
+
+    def test_uninstall_removes_capability(self):
+        """Test uninstall removes capability from sandbox."""
+        sandbox = Sandbox(capabilities={"fs": FileSystemCapability()})
+        loader = CapabilityLoader(sandbox=sandbox)
+
+        assert "fs" in sandbox.capabilities
+
+        result = loader.uninstall("fs")
+
+        assert "uninstalled" in result.lower()
+        assert "fs" not in sandbox.capabilities
+
+    def test_uninstall_loader_fails(self):
+        """Test cannot uninstall the loader itself."""
+        sandbox = Sandbox()
+        loader = CapabilityLoader(sandbox=sandbox)
+        sandbox.inject_capability("loader", loader)
+
+        result = loader.uninstall("loader")
+
+        assert "Cannot uninstall" in result
+        assert "loader" in sandbox.capabilities
+
+    def test_describe_installed_returns_capability_description(self):
+        """Test describe_installed returns installed capability's description."""
+        fs = FileSystemCapability(read_only=True)
+        sandbox = Sandbox(capabilities={"fs": fs})
+        loader = CapabilityLoader(sandbox=sandbox)
+
+        desc = loader.describe_installed("fs")
+
+        assert "fs" in desc
+        assert "read" in desc.lower()
+
+    def test_install_derived_creates_restricted_version(self):
+        """Test install_derived creates a restricted capability."""
+        sandbox = Sandbox(capabilities={"fs": FileSystemCapability()})
+        loader = CapabilityLoader(sandbox=sandbox)
+
+        result = loader.install_derived("fs_ro", "fs", read_only=True)
+
+        assert "fs_ro" in sandbox.capabilities
+        assert sandbox.capabilities["fs_ro"].read_only is True
+
+    def test_get_contract_returns_contract(self):
+        """Test get_contract returns capability's contract."""
+        sandbox = Sandbox()
+        loader = CapabilityLoader(sandbox=sandbox)
+
+        contract = loader.get_contract("fs")
+
+        assert contract is not None
+        assert len(contract.reads) > 0
+
+    def test_loader_contract_declares_spawns(self):
+        """Test loader's own contract declares it spawns capabilities."""
+        sandbox = Sandbox()
+        loader = CapabilityLoader(sandbox=sandbox)
+
+        contract = loader.contract()
+
+        assert contract.spawns is True
+
+
+class TestCapabilityContracts:
+    """Tests for capability contract() implementations."""
+
+    def test_file_system_contract_reflects_config(self):
+        """Test FileSystemCapability contract reflects configuration."""
+        # Read-write capability
+        fs_rw = FileSystemCapability()
+        contract = fs_rw.contract()
+        assert len(contract.reads) > 0
+        assert len(contract.writes) > 0
+
+        # Read-only capability
+        fs_ro = FileSystemCapability(read_only=True)
+        contract = fs_ro.contract()
+        assert len(contract.reads) > 0
+        assert len(contract.writes) == 0
+
+    def test_command_line_contract_reflects_allowlist(self):
+        """Test CommandLineCapability contract reflects allowlist."""
+        # Unrestricted
+        cmd_all = CommandLineCapability()
+        contract = cmd_all.contract()
+        assert "shell:*" in contract.executes
+
+        # Restricted
+        cmd_git = CommandLineCapability(allowed_commands=["git", "ls"])
+        contract = cmd_git.contract()
+        assert "shell:git *" in contract.executes
+        assert "shell:ls *" in contract.executes
+        assert "shell:*" not in contract.executes
+
+    def test_self_source_contract_declares_spawns(self):
+        """Test SelfSourceCapability contract declares it can spawn."""
+        cap = SelfSourceCapability()
+        contract = cap.contract()
+
+        assert contract.spawns is True
+
+    def test_user_communication_contract(self):
+        """Test UserCommunicationCapability has read/write contract."""
+        cap = UserCommunicationCapability()
+        contract = cap.contract()
+
+        assert "user:input" in contract.reads
+        assert "user:output" in contract.writes
+
+
+class TestCapabilityDerive:
+    """Tests for capability derive() functionality."""
+
+    def test_file_system_derive_read_only(self):
+        """Test deriving a read-only file system capability."""
+        fs = FileSystemCapability(allowed_paths=["/tmp"])
+        fs_ro = fs.derive(read_only=True)
+
+        assert fs_ro.read_only is True
+        assert fs.read_only is False  # Original unchanged
+
+    def test_file_system_derive_restricts_paths(self):
+        """Test deriving with more restricted paths."""
+        fs = FileSystemCapability(allowed_paths=[Path("/tmp")])
+        fs_sub = fs.derive(allowed_paths=[Path("/tmp/subdir")])
+
+        # Derived should have the restricted path
+        assert any("subdir" in str(p) for p in fs_sub.allowed_paths)
+
+    def test_command_line_derive_restricts_commands(self):
+        """Test deriving with fewer allowed commands."""
+        cmd = CommandLineCapability(allowed_commands=["git", "ls", "cat"])
+        cmd_git = cmd.derive(allowed_commands=["git"])
+
+        assert cmd_git.allowed_commands == ["git"]
+
+    def test_derive_returns_new_instance(self):
+        """Test that derive returns a new instance, not modifying original."""
+        fs = FileSystemCapability()
+        fs_ro = fs.derive(read_only=True)
+
+        assert fs is not fs_ro
+        assert fs.read_only is False
+        assert fs_ro.read_only is True

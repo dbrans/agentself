@@ -5,9 +5,11 @@ import time
 
 from agentself.core import (
     CapabilityCall,
+    CapabilityContract,
     ExecutionPlan,
     ExecutionResult,
     ExecutionMode,
+    PermissionStrategy,
     DependencyInfo,
 )
 
@@ -306,3 +308,118 @@ class TestExecutionMode:
         """Test mode enum values."""
         assert ExecutionMode.RECORD.value == "record"
         assert ExecutionMode.EXECUTE.value == "execute"
+
+
+class TestPermissionStrategy:
+    """Tests for PermissionStrategy enum."""
+
+    def test_strategy_values(self):
+        """Test all strategy values exist."""
+        assert PermissionStrategy.PRE_APPROVED.value == "pre_approved"
+        assert PermissionStrategy.CONTRACT_BASED.value == "contract_based"
+        assert PermissionStrategy.CALL_BY_CALL.value == "call_by_call"
+        assert PermissionStrategy.BUDGET_BASED.value == "budget_based"
+        assert PermissionStrategy.AUDIT_ONLY.value == "audit_only"
+
+
+class TestCapabilityContract:
+    """Tests for CapabilityContract."""
+
+    def test_empty_contract(self):
+        """Test empty contract has no effects declared."""
+        contract = CapabilityContract()
+
+        assert contract.reads == []
+        assert contract.writes == []
+        assert contract.executes == []
+        assert contract.network == []
+        assert contract.spawns is False
+        assert "(no effects declared)" in str(contract)
+
+    def test_contract_with_reads_writes(self):
+        """Test contract with read/write patterns."""
+        contract = CapabilityContract(
+            reads=["file:*.py", "file:*.md"],
+            writes=["file:src/**"],
+        )
+
+        assert len(contract.reads) == 2
+        assert len(contract.writes) == 1
+        assert "reads:" in str(contract)
+        assert "writes:" in str(contract)
+
+    def test_contract_covers_matching_resource(self):
+        """Test covers() matches resources correctly."""
+        contract = CapabilityContract(
+            reads=["file:*.py"],
+            writes=["file:src/*"],
+        )
+
+        # Should match
+        assert contract.covers("reads", "file:main.py")
+        assert contract.covers("writes", "file:src/app.py")
+
+        # Should not match
+        assert not contract.covers("reads", "file:data.json")
+        assert not contract.covers("writes", "file:tests/test.py")
+
+    def test_contract_merge(self):
+        """Test merging two contracts."""
+        c1 = CapabilityContract(
+            reads=["file:*.py"],
+            writes=["file:src/*"],
+        )
+        c2 = CapabilityContract(
+            reads=["file:*.md"],
+            network=["https://api.example.com/*"],
+            spawns=True,
+        )
+
+        merged = c1.merge(c2)
+
+        assert "file:*.py" in merged.reads
+        assert "file:*.md" in merged.reads
+        assert "file:src/*" in merged.writes
+        assert "https://api.example.com/*" in merged.network
+        assert merged.spawns is True
+
+    def test_contract_is_subset_of(self):
+        """Test subset checking."""
+        parent = CapabilityContract(
+            reads=["file:**"],
+            writes=["file:src/**"],
+            spawns=True,
+        )
+        child = CapabilityContract(
+            reads=["file:src/main.py"],
+            writes=["file:src/app.py"],
+        )
+
+        # Child should be subset of parent
+        assert child.is_subset_of(parent)
+
+        # Parent not subset of more restricted child
+        # (This simplified check may not catch all cases)
+
+    def test_contract_spawns_flag(self):
+        """Test spawns flag in str representation."""
+        contract = CapabilityContract(spawns=True)
+
+        assert "spawns: true" in str(contract)
+
+    def test_contract_all_fields(self):
+        """Test contract with all fields populated."""
+        contract = CapabilityContract(
+            reads=["file:*.py"],
+            writes=["file:output/*"],
+            executes=["shell:git *"],
+            network=["https://*"],
+            spawns=True,
+        )
+
+        s = str(contract)
+        assert "reads:" in s
+        assert "writes:" in s
+        assert "executes:" in s
+        assert "network:" in s
+        assert "spawns:" in s

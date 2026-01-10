@@ -7,29 +7,75 @@ from __future__ import annotations
 
 import fnmatch
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agentself.capabilities.base import Capability
+
+if TYPE_CHECKING:
+    from agentself.core import CapabilityContract
 
 
 class FileSystemCapability(Capability):
     """Read and write files within allowed paths."""
-    
-    name = "file_system"
+
+    name = "fs"
     description = "Read and write files within allowed paths."
-    
+
     def __init__(
         self,
         allowed_paths: list[Path | str] | None = None,
         read_only: bool = False,
     ):
         """Initialize with allowed paths and read-only flag.
-        
+
         Args:
             allowed_paths: List of paths the agent can access. If None, all paths allowed.
             read_only: If True, write operations are disabled.
         """
         self.allowed_paths = [Path(p).resolve() for p in (allowed_paths or [])]
         self.read_only = read_only
+
+    def contract(self) -> "CapabilityContract":
+        """Declare what this capability might do."""
+        from agentself.core import CapabilityContract
+
+        # Build path patterns from allowed_paths
+        if self.allowed_paths:
+            path_patterns = [f"file:{p}/**" for p in self.allowed_paths]
+        else:
+            path_patterns = ["file:**"]
+
+        return CapabilityContract(
+            reads=path_patterns,
+            writes=[] if self.read_only else path_patterns,
+        )
+
+    def derive(self, **restrictions) -> "FileSystemCapability":
+        """Create a more restricted version.
+
+        Args:
+            read_only: If True, disable write operations.
+            allowed_paths: Restrict to these paths (must be subset of current).
+        """
+        new_read_only = restrictions.get("read_only", self.read_only)
+        new_paths = restrictions.get("allowed_paths", self.allowed_paths)
+
+        # Ensure new paths are subset of current paths
+        if self.allowed_paths and new_paths:
+            validated_paths = []
+            for new_path in new_paths:
+                new_resolved = Path(new_path).resolve()
+                if any(
+                    new_resolved == allowed or allowed in new_resolved.parents
+                    for allowed in self.allowed_paths
+                ):
+                    validated_paths.append(new_resolved)
+            new_paths = validated_paths
+
+        return FileSystemCapability(
+            allowed_paths=new_paths,
+            read_only=new_read_only or self.read_only,  # Can only make more restrictive
+        )
     
     def _is_path_allowed(self, path: Path) -> bool:
         """Check if a path is within allowed paths."""
