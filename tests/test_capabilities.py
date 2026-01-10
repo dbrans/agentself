@@ -202,3 +202,95 @@ class TestCommandLineCapability:
         output = cap.run_interactive("echo 'test'")
         
         assert "test" in output
+
+
+class TestSelfSourceCapability:
+    """Tests for SelfSourceCapability."""
+    
+    def test_add_capability_stages_new(self):
+        """Test adding a new capability stages it."""
+        from agentself.capabilities.self_source import SelfSourceCapability
+        
+        cap = SelfSourceCapability()
+        code = '''
+from agentself.capabilities.base import Capability
+
+class TestCapability(Capability):
+    """A test capability."""
+    name = "test"
+    description = "Test."
+'''
+        result = cap.add_capability("test", code)
+        
+        assert "staged" in result.lower()
+        assert "test" in cap._staged_capabilities
+    
+    def test_track_changes_shows_staged(self):
+        """Test track_changes shows staged capabilities."""
+        from agentself.capabilities.self_source import SelfSourceCapability
+        
+        cap = SelfSourceCapability()
+        cap.add_capability("new_cap", """
+from agentself.capabilities.base import Capability
+class NewCap(Capability):
+    name = "new"
+""")
+        
+        result = cap.track_changes()
+        
+        assert "new_cap" in result
+        assert "New Capabilities" in result
+    
+    def test_rollback_capability_discards_staged(self):
+        """Test rollback_capability discards changes."""
+        from agentself.capabilities.self_source import SelfSourceCapability
+        
+        cap = SelfSourceCapability()
+        cap.add_capability("temp", """
+from agentself.capabilities.base import Capability
+class Temp(Capability):
+    name = "temp"
+""")
+        
+        assert "temp" in cap._staged_capabilities
+        
+        result = cap.rollback_capability("temp")
+        
+        assert "discarded" in result.lower()
+        assert "temp" not in cap._staged_capabilities
+    
+    def test_rollback_all_clears_everything(self):
+        """Test rollback_all clears all staged changes."""
+        from agentself.capabilities.self_source import SelfSourceCapability
+        
+        cap = SelfSourceCapability()
+        cap.add_capability("one", """
+from agentself.capabilities.base import Capability
+class One(Capability):
+    name = "one"
+""")
+        cap.add_capability("two", """
+from agentself.capabilities.base import Capability
+class Two(Capability):
+    name = "two"
+""")
+        
+        assert len(cap._staged_capabilities) == 2
+        
+        result = cap.rollback_all()
+        
+        assert "2" in result
+        assert len(cap._staged_capabilities) == 0
+    
+    def test_describe_shows_new_methods(self):
+        """Test describe shows the new modification methods."""
+        from agentself.capabilities.self_source import SelfSourceCapability
+        
+        cap = SelfSourceCapability()
+        desc = cap.describe()
+        
+        assert "modify_capability" in desc
+        assert "diff_capability" in desc
+        assert "track_changes" in desc
+        assert "rollback" in desc
+

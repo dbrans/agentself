@@ -1,19 +1,26 @@
-"""agentself: A self-improving coding agent.
+"""agentself - A self-improving sandboxed coding agent."""
 
-The agent can read and modify its own source code, track runtime changes,
-and persist modifications back to files for versioning.
-"""
-
-from agentself.agent import Agent, tool
-from agentself.generator import SourceGenerator
-from agentself.tracker import ChangeTracker, ToolChange
+from agentself.agent import SandboxedAgent, Message
+from agentself.sandbox import Sandbox, ExecutionResult
+from agentself.capabilities import (
+    Capability,
+    FileSystemCapability,
+    UserCommunicationCapability,
+    SelfSourceCapability,
+    CommandLineCapability,
+)
 
 __all__ = [
-    "Agent",
-    "tool",
-    "ChangeTracker",
-    "ToolChange",
-    "SourceGenerator",
+    # Agent
+    "SandboxedAgent",
+    "Message",
+    # Sandbox
+    "Sandbox",
+    "ExecutionResult",
+    # Capabilities
+    "Capability",
+    "FileSystemCapability",
+    "UserCommunicationCapability",
+    "SelfSourceCapability",
+    "CommandLineCapability",
 ]
-
-__version__ = "0.1.0"
