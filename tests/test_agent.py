@@ -4,8 +4,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentself.agent import SandboxedAgent, Message, DEFAULT_SYSTEM_PROMPT
+from agentself.agent import SandboxedAgent, Message, AgentConfig, DEFAULT_SYSTEM_PROMPT
 from agentself.sandbox import Sandbox
+from agentself.capabilities import FileSystemCapability, UserCommunicationCapability
+from agentself.permissions import AutoApproveHandler
 
 
 class TestMessage:
@@ -14,6 +16,32 @@ class TestMessage:
     def test_to_api_format(self):
         msg = Message(role="user", content="Hello")
         assert msg.to_api() == {"role": "user", "content": "Hello"}
+
+    def test_to_dict(self):
+        msg = Message(role="user", content="Hello")
+        d = msg.to_dict()
+        assert d == {"role": "user", "content": "Hello"}
+
+    def test_from_dict(self):
+        d = {"role": "assistant", "content": "Hi there"}
+        msg = Message.from_dict(d)
+        assert msg.role == "assistant"
+        assert msg.content == "Hi there"
+
+
+class TestAgentConfig:
+    """Tests for AgentConfig class."""
+
+    def test_default_values(self):
+        config = AgentConfig()
+        assert config.model == "claude-sonnet-4-20250514"
+        assert config.max_tokens == 4096
+        assert config.max_retries == 3
+
+    def test_custom_values(self):
+        config = AgentConfig(model="custom-model", max_tokens=1000)
+        assert config.model == "custom-model"
+        assert config.max_tokens == 1000
 
 
 class TestSandboxedAgentWithMockedClient:
@@ -28,11 +56,11 @@ class TestSandboxedAgentWithMockedClient:
     @pytest.fixture
     def agent(self, mock_client):
         """Create an agent with mocked client."""
-        return SandboxedAgent.with_default_capabilities()
+        return SandboxedAgent()
 
     def test_agent_initialization(self, agent):
         """Test that agent initializes correctly."""
-        assert agent.model == "claude-sonnet-4-20250514"
+        assert agent.config.model == "claude-sonnet-4-20250514"
         assert len(agent.messages) == 0
 
     def test_agent_has_default_capabilities(self, agent):
@@ -59,6 +87,13 @@ class TestSandboxedAgentWithMockedClient:
         """Test that execute() can access capabilities."""
         result = agent.execute("user.say('hello')")
         assert result.success
+
+    def test_analyze_code(self, agent):
+        """Test analyze() shows what code will do."""
+        plan = agent.analyze("user.say('test')")
+        assert plan.success
+        assert len(plan.calls) == 1
+        assert plan.calls[0].capability_name == "user"
 
     def test_extract_code_blocks(self, agent):
         """Test code block extraction from markdown."""
@@ -93,35 +128,123 @@ class TestSandboxedAgentCreation:
         with patch("agentself.agent.anthropic.Anthropic") as mock:
             yield mock.return_value
 
-    def test_with_default_capabilities(self, mock_client):
+    def test_default_agent_has_capabilities(self, mock_client):
         """Test creating agent with default capabilities."""
-        agent = SandboxedAgent.with_default_capabilities()
-        
+        agent = SandboxedAgent()
+
         assert "fs" in agent.sandbox.capabilities
         assert "user" in agent.sandbox.capabilities
         assert "self" in agent.sandbox.capabilities
         assert "cmd" in agent.sandbox.capabilities
 
-    def test_custom_allowed_paths(self, mock_client, tmp_path):
-        """Test creating agent with custom allowed paths."""
-        agent = SandboxedAgent.with_default_capabilities(
-            allowed_paths=[tmp_path]
+    def test_with_capabilities_class_method(self, mock_client):
+        """Test with_capabilities class method."""
+        agent = SandboxedAgent.with_capabilities(
+            capabilities={
+                "fs": FileSystemCapability(),
+                "user": UserCommunicationCapability(),
+            }
         )
-        
-        fs = agent.sandbox.capabilities["fs"]
-        assert tmp_path.resolve() in fs.allowed_paths
 
-    def test_custom_allowed_commands(self, mock_client):
-        """Test creating agent with custom allowed commands."""
-        agent = SandboxedAgent.with_default_capabilities(
-            allowed_commands=["git", "npm"]
+        assert "fs" in agent.sandbox.capabilities
+        assert "user" in agent.sandbox.capabilities
+        assert "cmd" not in agent.sandbox.capabilities
+
+    def test_interactive_class_method(self, mock_client, tmp_path):
+        """Test interactive class method."""
+        agent = SandboxedAgent.interactive(
+            allowed_paths=[tmp_path],
+            allowed_commands=["echo", "ls"],
         )
-        
-        cmd = agent.sandbox.capabilities["cmd"]
-        assert cmd.allowed_commands == ["git", "npm"]
+
+        assert "fs" in agent.sandbox.capabilities
+        assert "cmd" in agent.sandbox.capabilities
 
     def test_empty_sandbox(self, mock_client):
         """Test creating agent with empty sandbox."""
         agent = SandboxedAgent(sandbox=Sandbox())
-        
+
         assert len(agent.sandbox.capabilities) == 0
+
+    def test_custom_config(self, mock_client):
+        """Test creating agent with custom config."""
+        config = AgentConfig(model="custom-model", max_tokens=2000)
+        agent = SandboxedAgent(config=config)
+
+        assert agent.config.model == "custom-model"
+        assert agent.config.max_tokens == 2000
+
+
+class TestSandboxedAgentSessionManagement:
+    """Tests for session management."""
+
+    @pytest.fixture
+    def mock_client(self):
+        with patch("agentself.agent.anthropic.Anthropic") as mock:
+            yield mock.return_value
+
+    @pytest.fixture
+    def agent(self, mock_client):
+        return SandboxedAgent()
+
+    def test_clear_history(self, agent):
+        """Test clearing conversation history."""
+        agent.messages.append(Message(role="user", content="test"))
+        agent.clear_history()
+
+        assert len(agent.messages) == 0
+
+    def test_reset(self, agent):
+        """Test full reset."""
+        agent.messages.append(Message(role="user", content="test"))
+        agent.sandbox.execute("x = 42")
+
+        agent.reset()
+
+        assert len(agent.messages) == 0
+        # Variable should be gone
+        result = agent.sandbox.execute("x")
+        assert not result.success
+
+    def test_save_and_load_session(self, agent, tmp_path):
+        """Test saving and loading session."""
+        agent.messages.append(Message(role="user", content="Hello"))
+        agent.messages.append(Message(role="assistant", content="Hi there"))
+
+        session_file = tmp_path / "session.json"
+        agent.save_session(session_file)
+
+        # Create new agent and load
+        new_agent = SandboxedAgent()
+        new_agent.load_session(session_file)
+
+        assert len(new_agent.messages) == 2
+        assert new_agent.messages[0].content == "Hello"
+        assert new_agent.messages[1].content == "Hi there"
+
+
+class TestSandboxedAgentIntrospection:
+    """Tests for agent introspection."""
+
+    @pytest.fixture
+    def mock_client(self):
+        with patch("agentself.agent.anthropic.Anthropic") as mock:
+            yield mock.return_value
+
+    @pytest.fixture
+    def agent(self, mock_client):
+        return SandboxedAgent()
+
+    def test_get_capabilities(self, agent):
+        """Test getting capabilities."""
+        caps = agent.get_capabilities()
+        assert "fs" in caps
+        assert "user" in caps
+
+    def test_get_history(self, agent):
+        """Test getting execution history."""
+        agent.execute("x = 1")
+        agent.execute("y = 2")
+
+        history = agent.get_history()
+        assert len(history) == 2

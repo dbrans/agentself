@@ -1,26 +1,101 @@
-"""agentself - A self-improving sandboxed coding agent."""
+"""AgentSelf: A capability-based self-improving agent framework.
 
-from agentself.agent import SandboxedAgent, Message
-from agentself.sandbox import Sandbox, ExecutionResult
+This package provides:
+- A sandboxed execution environment with two-phase execution
+- A capability system for controlled access to external resources
+- Permission handling for human-in-the-loop oversight
+- Self-modification capabilities for runtime agent improvement
+
+Key Components:
+- Sandbox: Restricted Python execution with capability injection
+- Capability: Base class for controlled resource access
+- SandboxedAgent: LLM-powered agent with code execution
+- Permission handlers: Auto-approve, interactive, policy-based
+
+Example:
+    from agentself import SandboxedAgent
+
+    agent = SandboxedAgent()
+    response = agent.chat("List all Python files in the current directory")
+    print(response)
+"""
+
+from agentself.agent import (
+    AgentConfig,
+    ConversationTurn,
+    Message,
+    SandboxedAgent,
+)
 from agentself.capabilities import (
     Capability,
-    FileSystemCapability,
-    UserCommunicationCapability,
-    SelfSourceCapability,
     CommandLineCapability,
+    FileSystemCapability,
+    SelfSourceCapability,
+    UserCommunicationCapability,
 )
+from agentself.core import (
+    CapabilityCall,
+    DependencyInfo,
+    ExecutionMode,
+    ExecutionPlan,
+    ExecutionResult,
+)
+from agentself.permissions import (
+    AutoApproveHandler,
+    AutoDenyHandler,
+    CompositeHandler,
+    InteractiveHandler,
+    PermissionDecision,
+    PermissionHandler,
+    PermissionRequest,
+    PermissionRule,
+    PolicyHandler,
+)
+from agentself.proxy import (
+    CallRecorder,
+    CapabilityProxy,
+    ProxyFactory,
+)
+from agentself.sandbox import (
+    Sandbox,
+    SAFE_BUILTINS,
+)
+
+__version__ = "0.1.0"
 
 __all__ = [
     # Agent
     "SandboxedAgent",
+    "AgentConfig",
     "Message",
+    "ConversationTurn",
     # Sandbox
     "Sandbox",
+    "SAFE_BUILTINS",
+    # Core types
+    "CapabilityCall",
+    "ExecutionPlan",
     "ExecutionResult",
+    "ExecutionMode",
+    "DependencyInfo",
     # Capabilities
     "Capability",
     "FileSystemCapability",
+    "CommandLineCapability",
     "UserCommunicationCapability",
     "SelfSourceCapability",
-    "CommandLineCapability",
+    # Permissions
+    "PermissionHandler",
+    "PermissionRequest",
+    "PermissionDecision",
+    "PermissionRule",
+    "AutoApproveHandler",
+    "AutoDenyHandler",
+    "InteractiveHandler",
+    "PolicyHandler",
+    "CompositeHandler",
+    # Proxy
+    "CapabilityProxy",
+    "CallRecorder",
+    "ProxyFactory",
 ]
