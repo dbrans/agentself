@@ -9,7 +9,9 @@
       "Bash(gh auth:*)",
       "Bash(gh repo create:*)",
       "Bash(python -m pytest tests/ -v --tb=short)",
-      "Bash(uv pip install:*)"
+      "Bash(uv pip install:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(source .venv/bin/activate)"
     ]
   }
 }

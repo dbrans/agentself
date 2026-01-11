@@ -323,8 +323,9 @@ class TestCap(Capability):
 
         result = cap.test_capability("testcap")
 
-        assert "Compilation: OK" in result
+        assert "PASS" in result
         assert "Instantiation: OK" in result
+        assert "Contract: valid" in result
 
     def test_test_capability_catches_instantiation_error(self):
         """Test that test_capability catches instantiation errors."""
@@ -687,6 +688,197 @@ class TestCapabilityContracts:
 
         assert "user:input" in contract.reads
         assert "user:output" in contract.writes
+
+
+class TestSelfSourceCapabilityTemplates:
+    """Tests for SelfSourceCapability template operations."""
+
+    def test_list_templates_shows_available(self):
+        """Test that list_templates shows available templates."""
+        cap = SelfSourceCapability()
+        result = cap.list_templates()
+
+        assert "basic" in result
+        assert "data_processor" in result
+        assert "validator" in result
+        assert "api_client" in result
+
+    def test_from_template_creates_capability(self):
+        """Test from_template creates and stages a capability."""
+        cap = SelfSourceCapability()
+
+        result = cap.from_template("basic", "my_tool", "A helpful tool")
+
+        assert "my_tool" in cap._staged_capabilities
+        assert "Created capability" in result
+        assert "my_tool" in result
+
+    def test_from_template_generates_class_name(self):
+        """Test from_template generates proper class name."""
+        cap = SelfSourceCapability()
+        cap.from_template("basic", "json_parser", "Parse JSON")
+
+        change = cap._staged_capabilities["json_parser"]
+        assert "JsonParserCapability" in change.new_source
+
+    def test_from_template_invalid_template_returns_error(self):
+        """Test from_template with invalid template returns error."""
+        cap = SelfSourceCapability()
+
+        result = cap.from_template("nonexistent", "test", "Test")
+
+        assert "Unknown template" in result
+        assert "test" not in cap._staged_capabilities
+
+    def test_from_template_can_be_tested(self):
+        """Test that a templated capability can be tested."""
+        cap = SelfSourceCapability()
+        cap.from_template("validator", "my_validator", "Validate stuff")
+
+        result = cap.test_capability("my_validator")
+
+        assert "PASS" in result
+        assert "Contract: valid" in result
+
+
+class TestSelfSourceCapabilityContractValidation:
+    """Tests for contract validation in test_capability."""
+
+    def test_test_validates_contract_present(self):
+        """Test that test_capability validates contract is present."""
+        cap = SelfSourceCapability()
+        cap.add_capability("with_contract", """
+class WithContract(Capability):
+    name = "with_contract"
+    description = "Has a contract."
+
+    def contract(self):
+        from agentself.core import CapabilityContract
+        return CapabilityContract(reads=["file:*"])
+""")
+
+        result = cap.test_capability("with_contract")
+
+        assert "PASS" in result
+        assert "Contract: valid" in result
+
+    def test_test_detects_invalid_contract(self):
+        """Test that test_capability detects invalid contract return."""
+        cap = SelfSourceCapability()
+        cap.add_capability("bad_contract", """
+class BadContract(Capability):
+    name = "bad_contract"
+    description = "Has a bad contract."
+
+    def contract(self):
+        return "not a contract"  # Wrong return type
+""")
+
+        result = cap.test_capability("bad_contract")
+
+        assert "FAIL" in result
+        assert "Contract: invalid" in result
+
+
+class TestSelfSourceCapabilityCustomTests:
+    """Tests for custom test code execution."""
+
+    def test_custom_test_code_passes(self):
+        """Test that custom test code can pass."""
+        cap = SelfSourceCapability()
+        cap.add_capability("processor", """
+class Processor(Capability):
+    name = "processor"
+    description = "Process data."
+
+    def process(self, data: str) -> str:
+        return data.upper()
+""")
+
+        result = cap.test_capability(
+            "processor",
+            test_code="assert cap.process('hello') == 'HELLO'"
+        )
+
+        assert "PASS" in result
+        assert "Custom tests: PASSED" in result
+
+    def test_custom_test_code_fails(self):
+        """Test that custom test code can fail."""
+        cap = SelfSourceCapability()
+        cap.add_capability("processor", """
+class Processor(Capability):
+    name = "processor"
+    description = "Process data."
+
+    def process(self, data: str) -> str:
+        return data.upper()
+""")
+
+        result = cap.test_capability(
+            "processor",
+            test_code="assert cap.process('hello') == 'hello'"  # Wrong assertion
+        )
+
+        assert "FAIL" in result
+        assert "Assertion failed" in result
+
+    def test_run_capability_test_runs_additional_tests(self):
+        """Test run_capability_test runs additional tests."""
+        cap = SelfSourceCapability()
+        cap.add_capability("math_cap", """
+class MathCap(Capability):
+    name = "math_cap"
+    description = "Math operations."
+
+    def add(self, a: int, b: int) -> int:
+        return a + b
+""")
+        cap.test_capability("math_cap")  # Initial test to compile
+
+        result = cap.run_capability_test(
+            "math_cap",
+            "assert cap.add(2, 3) == 5"
+        )
+
+        assert "PASSED" in result
+
+
+class TestSelfSourceCapabilityTestResult:
+    """Tests for TestResult dataclass."""
+
+    def test_test_result_str_shows_pass(self):
+        """Test TestResult shows PASS when successful."""
+        from agentself.capabilities.self_source import TestResult
+
+        result = TestResult(
+            success=True,
+            output="All good",
+            duration=0.1,
+            contract_valid=True,
+            instantiation_ok=True,
+            methods_tested=["describe"],
+        )
+
+        output = str(result)
+        assert "PASS" in output
+        assert "0.100s" in output
+        assert "describe" in output
+
+    def test_test_result_str_shows_fail(self):
+        """Test TestResult shows FAIL when unsuccessful."""
+        from agentself.capabilities.self_source import TestResult
+
+        result = TestResult(
+            success=False,
+            output="",
+            error="Something went wrong",
+            duration=0.05,
+        )
+
+        output = str(result)
+        assert "FAIL" in output
+        assert "Something went wrong" in output
 
 
 class TestCapabilityDerive:

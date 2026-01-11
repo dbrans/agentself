@@ -3,7 +3,8 @@
 This capability allows the agent to:
 - Read its own source code and that of other capabilities
 - List and describe available capabilities
-- Create new capabilities at runtime
+- Create new capabilities at runtime (with templates for common patterns)
+- Test capabilities in isolated sandboxes before installation
 - Modify existing capabilities
 - Hot-reload changes into the running sandbox
 - Commit changes to disk for persistence
@@ -16,7 +17,9 @@ from __future__ import annotations
 import ast
 import difflib
 import inspect
+import time
 from dataclasses import dataclass, field
+from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Type
 
@@ -25,6 +28,48 @@ from agentself.capabilities.base import Capability
 if TYPE_CHECKING:
     from agentself.core import CapabilityContract
     from agentself.sandbox import Sandbox
+
+
+@dataclass
+class TestResult:
+    """Result of testing a staged capability."""
+
+    success: bool
+    """Whether all tests passed."""
+
+    output: str
+    """Combined output from tests."""
+
+    error: str | None = None
+    """Error message if tests failed."""
+
+    duration: float = 0.0
+    """Time taken to run tests in seconds."""
+
+    contract_valid: bool = False
+    """Whether the capability has a valid contract."""
+
+    instantiation_ok: bool = False
+    """Whether the capability could be instantiated."""
+
+    methods_tested: list[str] = field(default_factory=list)
+    """Methods that were tested."""
+
+    def __str__(self) -> str:
+        status = "PASS" if self.success else "FAIL"
+        lines = [f"Test Result: {status}"]
+        lines.append(f"  Duration: {self.duration:.3f}s")
+        lines.append(f"  Instantiation: {'OK' if self.instantiation_ok else 'FAILED'}")
+        lines.append(f"  Contract: {'valid' if self.contract_valid else 'invalid/missing'}")
+        if self.methods_tested:
+            lines.append(f"  Methods tested: {', '.join(self.methods_tested)}")
+        if self.error:
+            lines.append(f"  Error: {self.error}")
+        if self.output:
+            lines.append("  Output:")
+            for line in self.output.strip().split("\n"):
+                lines.append(f"    {line}")
+        return "\n".join(lines)
 
 
 @dataclass
@@ -46,6 +91,9 @@ class CapabilityChange:
     compiled_class: Type[Capability] | None = None
     """The compiled class, if successfully compiled."""
 
+    test_results: list[TestResult] = field(default_factory=list)
+    """History of test results."""
+
     def get_diff(self) -> str:
         """Get a unified diff of the change."""
         if self.original_source is None:
@@ -61,6 +109,10 @@ class CapabilityChange:
             tofile=f"{self.name} (modified)",
         )
         return "".join(diff) or "(no changes)"
+
+    def last_test_passed(self) -> bool:
+        """Check if the most recent test passed."""
+        return self.test_results[-1].success if self.test_results else False
 
 
 class SelfSourceCapability(Capability):
@@ -80,6 +132,98 @@ from pathlib import Path
 from typing import Any
 from agentself.capabilities.base import Capability
 """
+
+    # Templates for creating new capabilities
+    TEMPLATES = {
+        "basic": '''class {class_name}(Capability):
+    """{description}"""
+
+    name = "{name}"
+    description = "{description}"
+
+    def contract(self) -> "CapabilityContract":
+        """Declare what this capability might do."""
+        from agentself.core import CapabilityContract
+        return CapabilityContract(
+            reads=[],   # e.g., ["file:*.txt"]
+            writes=[],  # e.g., ["file:output/*"]
+        )
+
+    def example_method(self, arg: str) -> str:
+        """Example method - replace with your actual functionality."""
+        return f"Processed: {{arg}}"
+''',
+        "data_processor": '''class {class_name}(Capability):
+    """{description}"""
+
+    name = "{name}"
+    description = "{description}"
+
+    def __init__(self):
+        self._cache = {{}}
+
+    def contract(self) -> "CapabilityContract":
+        from agentself.core import CapabilityContract
+        return CapabilityContract(reads=["memory:cache"])
+
+    def process(self, data: str) -> str:
+        """Process input data and return result."""
+        # Implement your processing logic here
+        result = data.upper()  # Example transformation
+        return result
+
+    def get_stats(self) -> dict:
+        """Get processing statistics."""
+        return {{"cache_size": len(self._cache)}}
+''',
+        "validator": '''class {class_name}(Capability):
+    """{description}"""
+
+    name = "{name}"
+    description = "{description}"
+
+    def contract(self) -> "CapabilityContract":
+        from agentself.core import CapabilityContract
+        return CapabilityContract()  # Pure computation, no side effects
+
+    def validate(self, data: Any) -> tuple[bool, str]:
+        """Validate data and return (is_valid, message)."""
+        # Implement your validation logic here
+        if data is None:
+            return False, "Data cannot be None"
+        return True, "Validation passed"
+
+    def validate_many(self, items: list) -> list[tuple[bool, str]]:
+        """Validate multiple items."""
+        return [self.validate(item) for item in items]
+''',
+        "api_client": '''class {class_name}(Capability):
+    """{description}"""
+
+    name = "{name}"
+    description = "{description}"
+
+    def __init__(self, base_url: str = "https://api.example.com"):
+        self.base_url = base_url
+
+    def contract(self) -> "CapabilityContract":
+        from agentself.core import CapabilityContract
+        return CapabilityContract(
+            network=[f"{{self.base_url}}/*"],
+            reads=["response:*"],
+        )
+
+    def get(self, endpoint: str) -> dict:
+        """Make a GET request to the API."""
+        # Note: Actual HTTP would require an http client capability
+        # This is a template showing the structure
+        return {{"endpoint": endpoint, "status": "mock"}}
+
+    def post(self, endpoint: str, data: dict) -> dict:
+        """Make a POST request to the API."""
+        return {{"endpoint": endpoint, "data": data, "status": "mock"}}
+''',
+    }
 
     def __init__(
         self,
@@ -211,6 +355,71 @@ from agentself.capabilities.base import Capability
                 pass
 
         return config
+
+    # =========================================================================
+    # Templates: Scaffolding for new capabilities
+    # =========================================================================
+
+    def list_templates(self) -> str:
+        """List available capability templates.
+
+        Templates provide starting points for common capability patterns.
+
+        Returns:
+            List of template names and descriptions.
+        """
+        lines = ["Available Templates:", ""]
+        template_descriptions = {
+            "basic": "Simple capability with one method and a contract",
+            "data_processor": "Capability for processing/transforming data with caching",
+            "validator": "Pure validation logic with no side effects",
+            "api_client": "Template for wrapping external APIs",
+        }
+        for name, desc in template_descriptions.items():
+            lines.append(f"  - {name}: {desc}")
+        lines.append("")
+        lines.append("Use from_template(name, cap_name, description) to create a capability from a template.")
+        return "\n".join(lines)
+
+    def from_template(
+        self,
+        template_name: str,
+        capability_name: str,
+        description: str = "A new capability.",
+    ) -> str:
+        """Create and stage a new capability from a template.
+
+        This is the easiest way to create a new capability. Pick a template,
+        give it a name and description, then customize the generated code.
+
+        Args:
+            template_name: Name of the template (use list_templates() to see options).
+            capability_name: Name for the new capability (e.g., 'json_validator').
+            description: Description of what the capability does.
+
+        Returns:
+            The generated source code (also staged for testing/installation).
+        """
+        if template_name not in self.TEMPLATES:
+            available = ", ".join(self.TEMPLATES.keys())
+            return f"Unknown template '{template_name}'. Available: {available}"
+
+        # Generate class name from capability name
+        class_name = "".join(word.title() for word in capability_name.split("_")) + "Capability"
+
+        # Fill in the template
+        source = self.TEMPLATES[template_name].format(
+            class_name=class_name,
+            name=capability_name,
+            description=description,
+        )
+
+        # Stage it
+        result = self.add_capability(capability_name, source)
+
+        if "staged" in result.lower():
+            return f"Created capability '{capability_name}' from '{template_name}' template.\n\nSource:\n{source}\n\n{result}"
+        return result
 
     # =========================================================================
     # Staging: Preparing changes before applying them
@@ -366,16 +575,189 @@ from agentself.capabilities.base import Capability
     # Testing: Verify changes before activating them
     # =========================================================================
 
-    def test_capability(self, name: str) -> str:
-        """Test a staged capability by instantiating it.
+    def test_capability(self, name: str, test_code: str | None = None) -> str:
+        """Test a staged capability comprehensively.
 
         Verifies that the capability:
         1. Compiles successfully
         2. Can be instantiated
-        3. Has required methods (describe, etc.)
+        3. Has required methods (describe, contract)
+        4. Has a valid contract declaration
+        5. Passes custom test code (if provided)
+
+        The capability is tested in an isolated ephemeral sandbox to prevent
+        any side effects from affecting the main sandbox.
 
         Args:
             name: Name of the staged capability to test.
+            test_code: Optional Python code to test the capability.
+                      The capability instance is available as 'cap'.
+                      Example: "assert cap.process('hello') == 'HELLO'"
+
+        Returns:
+            Detailed test results.
+        """
+        start_time = time.time()
+
+        if name not in self._staged_capabilities:
+            return f"No staged changes for capability '{name}'."
+
+        change = self._staged_capabilities[name]
+
+        # Compilation check
+        if change.compiled_class is None:
+            result = self._compile_capability(change.new_source)
+            if isinstance(result, str):
+                test_result = TestResult(
+                    success=False,
+                    output="",
+                    error=f"Compilation failed: {result}",
+                    duration=time.time() - start_time,
+                )
+                change.test_results.append(test_result)
+                return str(test_result)
+            change.compiled_class = result
+
+        # Instantiation check
+        try:
+            instance = change.compiled_class()
+            instantiation_ok = True
+        except Exception as e:
+            test_result = TestResult(
+                success=False,
+                output="",
+                error=f"Instantiation failed: {type(e).__name__}: {e}",
+                duration=time.time() - start_time,
+            )
+            change.test_results.append(test_result)
+            return str(test_result)
+
+        # Contract validation
+        contract_valid = False
+        contract_error = None
+        try:
+            contract = instance.contract()
+            # Verify contract is a CapabilityContract
+            from agentself.core import CapabilityContract
+            if isinstance(contract, CapabilityContract):
+                contract_valid = True
+            else:
+                contract_error = f"contract() returned {type(contract)}, expected CapabilityContract"
+        except Exception as e:
+            contract_error = f"contract() failed: {type(e).__name__}: {e}"
+
+        # Check required methods
+        methods_tested = []
+        output_lines = []
+
+        if callable(getattr(instance, "describe", None)):
+            methods_tested.append("describe")
+            try:
+                desc = instance.describe()
+                output_lines.append(f"describe() returned: {len(desc)} chars")
+            except Exception as e:
+                output_lines.append(f"describe() raised: {e}")
+
+        if callable(getattr(instance, "contract", None)):
+            methods_tested.append("contract")
+
+        # Run in isolated sandbox if test code provided
+        test_error = None
+        if test_code:
+            test_error = self._run_isolated_test(instance, test_code, output_lines)
+
+        # Build result
+        success = instantiation_ok and contract_valid and (test_error is None)
+
+        test_result = TestResult(
+            success=success,
+            output="\n".join(output_lines),
+            error=contract_error or test_error,
+            duration=time.time() - start_time,
+            contract_valid=contract_valid,
+            instantiation_ok=instantiation_ok,
+            methods_tested=methods_tested,
+        )
+
+        change.test_results.append(test_result)
+
+        # Also include the description for context
+        result_str = str(test_result)
+        if success:
+            result_str += f"\n\nCapability Description:\n{instance.describe()}"
+
+        return result_str
+
+    def _run_isolated_test(
+        self,
+        instance: Capability,
+        test_code: str,
+        output_lines: list[str],
+    ) -> str | None:
+        """Run test code against a capability in isolation.
+
+        Args:
+            instance: The capability instance to test.
+            test_code: Python code to execute. 'cap' refers to the instance.
+            output_lines: List to append output to.
+
+        Returns:
+            Error message if test failed, None if passed.
+        """
+        # Create isolated namespace for testing
+        import sys
+        from io import StringIO
+
+        test_namespace = {
+            "cap": instance,
+            "print": print,
+            "assert": None,  # Will use Python's built-in
+            "len": len,
+            "str": str,
+            "int": int,
+            "float": float,
+            "list": list,
+            "dict": dict,
+            "tuple": tuple,
+            "set": set,
+            "True": True,
+            "False": False,
+            "None": None,
+        }
+
+        # Capture stdout
+        old_stdout = sys.stdout
+        captured = StringIO()
+
+        try:
+            sys.stdout = captured
+
+            # Execute test code
+            exec(test_code, test_namespace)
+
+            # Capture any output
+            test_output = captured.getvalue()
+            if test_output:
+                output_lines.append(f"Test output:\n{test_output}")
+
+            output_lines.append("Custom tests: PASSED")
+            return None
+
+        except AssertionError as e:
+            return f"Assertion failed: {e}"
+        except Exception as e:
+            return f"Test error: {type(e).__name__}: {e}"
+        finally:
+            sys.stdout = old_stdout
+
+    def run_capability_test(self, name: str, test_code: str) -> str:
+        """Run additional test code against a staged capability.
+
+        Use this to run more tests after the initial test_capability() call.
+
+        Args:
+            name: Name of the staged capability.
+            test_code: Python code to test. 'cap' refers to the capability instance.
 
         Returns:
             Test results.
@@ -386,31 +768,19 @@ from agentself.capabilities.base import Capability
         change = self._staged_capabilities[name]
 
         if change.compiled_class is None:
-            # Try to compile again
-            result = self._compile_capability(change.new_source)
-            if isinstance(result, str):
-                return f"Compilation failed: {result}"
-            change.compiled_class = result
+            return "Capability not compiled. Run test_capability() first."
 
-        # Try to instantiate
         try:
             instance = change.compiled_class()
         except Exception as e:
-            return f"Instantiation failed: {type(e).__name__}: {e}"
+            return f"Could not instantiate: {e}"
 
-        # Check required methods
-        if not hasattr(instance, "describe"):
-            return "Missing required method: describe()"
+        output_lines = []
+        error = self._run_isolated_test(instance, test_code, output_lines)
 
-        results = ["Test Results:", ""]
-        results.append(f"  Compilation: OK")
-        results.append(f"  Instantiation: OK")
-        results.append(f"  describe() method: {'OK' if callable(getattr(instance, 'describe', None)) else 'MISSING'}")
-        results.append("")
-        results.append("Description:")
-        results.append(instance.describe())
-
-        return "\n".join(results)
+        if error:
+            return f"Test FAILED: {error}\n" + "\n".join(output_lines)
+        return "Test PASSED\n" + "\n".join(output_lines)
 
     # =========================================================================
     # Hot-reload: Activate changes in the running sandbox
