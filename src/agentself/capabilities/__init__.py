@@ -13,11 +13,13 @@ Key classes:
 - FileSystemCapability: File read/write access
 - CommandLineCapability: Shell command execution
 - UserCommunicationCapability: Interaction with the user
-- SelfSourceCapability: Introspection and self-modification
+- SelfSourceCapability: Introspection and self-modification (Layer 2: capabilities)
+- CoreSourceCapability: Core infrastructure modification (Layer 1: agent/sandbox/etc)
 """
 
 from agentself.capabilities.base import Capability
 from agentself.capabilities.command_line import CommandLineCapability
+from agentself.capabilities.core_source import CoreSourceCapability
 from agentself.capabilities.file_system import FileSystemCapability
 from agentself.capabilities.loader import CapabilityLoader, CapabilityManifest
 from agentself.capabilities.self_source import SelfSourceCapability
@@ -28,6 +30,7 @@ __all__ = [
     "CapabilityLoader",
     "CapabilityManifest",
     "CommandLineCapability",
+    "CoreSourceCapability",
     "FileSystemCapability",
     "SelfSourceCapability",
     "UserCommunicationCapability",

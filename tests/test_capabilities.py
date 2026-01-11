@@ -7,6 +7,7 @@ import pytest
 
 from agentself.capabilities.base import Capability
 from agentself.capabilities.command_line import CommandLineCapability, CommandResult
+from agentself.capabilities.core_source import CoreSourceCapability, CORE_MODULES
 from agentself.capabilities.file_system import FileSystemCapability
 from agentself.capabilities.loader import CapabilityLoader, CapabilityManifest
 from agentself.capabilities.self_source import SelfSourceCapability
@@ -915,3 +916,363 @@ class TestCapabilityDerive:
         assert fs is not fs_ro
         assert fs.read_only is False
         assert fs_ro.read_only is True
+
+
+# =============================================================================
+# CoreSourceCapability Tests
+# =============================================================================
+
+
+class TestCoreSourceCapabilityIntrospection:
+    """Tests for CoreSourceCapability introspection operations."""
+
+    @pytest.fixture
+    def core_cap(self):
+        """Create a CoreSourceCapability with real source dir."""
+        return CoreSourceCapability(source_dir=Path("src/agentself"))
+
+    def test_list_modules_returns_core_modules(self, core_cap):
+        """Test list_modules returns the core module mapping."""
+        modules = core_cap.list_modules()
+
+        assert "agent" in modules
+        assert "sandbox" in modules
+        assert "core" in modules
+        assert "permissions" in modules
+        assert "proxy" in modules
+
+    def test_list_immutable_returns_immutable_modules(self, core_cap):
+        """Test list_immutable returns immutable module mapping."""
+        immutable = core_cap.list_immutable()
+
+        # Currently empty but should return dict
+        assert isinstance(immutable, dict)
+
+    def test_read_module_returns_source(self, core_cap):
+        """Test read_module returns the module source code."""
+        source = core_cap.read_module("core")
+
+        assert "class CapabilityContract" in source
+        assert "class ExecutionPlan" in source
+
+    def test_read_module_unknown_returns_error(self, core_cap):
+        """Test read_module with unknown module returns error."""
+        result = core_cap.read_module("nonexistent")
+
+        assert "Unknown module" in result
+        assert "nonexistent" in result
+
+    def test_describe_module_returns_summary(self, core_cap):
+        """Test describe_module returns module summary."""
+        desc = core_cap.describe_module("sandbox")
+
+        assert "sandbox" in desc.lower()
+        assert "Classes:" in desc
+        assert "Sandbox" in desc
+
+    def test_get_module_hash_returns_hash(self, core_cap):
+        """Test get_module_hash returns SHA256 hash."""
+        hash1 = core_cap.get_module_hash("core")
+        hash2 = core_cap.get_module_hash("core")
+
+        assert len(hash1) == 64  # SHA256 hex length
+        assert hash1 == hash2  # Same content = same hash
+
+
+class TestCoreSourceCapabilityStaging:
+    """Tests for CoreSourceCapability staging operations."""
+
+    @pytest.fixture
+    def temp_source(self, tmp_path):
+        """Create a temporary source directory with core modules."""
+        src_dir = tmp_path / "agentself"
+        src_dir.mkdir()
+
+        # Create minimal core.py
+        (src_dir / "core.py").write_text('''
+"""Core types."""
+class CapabilityContract:
+    pass
+''')
+
+        # Create minimal sandbox.py
+        (src_dir / "sandbox.py").write_text('''
+"""Sandbox."""
+class Sandbox:
+    def execute(self):
+        pass
+    def analyze(self):
+        pass
+''')
+
+        return src_dir
+
+    @pytest.fixture
+    def core_cap(self, temp_source, tmp_path):
+        """Create CoreSourceCapability with temp directories."""
+        return CoreSourceCapability(
+            source_dir=temp_source,
+            versions_dir=tmp_path / "versions",
+        )
+
+    def test_modify_module_stages_change(self, core_cap, temp_source):
+        """Test modify_module stages a change."""
+        original = core_cap.read_module("core")
+        new_source = original + "\n# Added comment"
+
+        result = core_cap.modify_module("core", new_source, "Add comment")
+
+        assert "staged" in result.lower()
+        assert "core" in core_cap._staged_changes
+
+    def test_modify_module_validates_syntax(self, core_cap):
+        """Test modify_module validates Python syntax."""
+        result = core_cap.modify_module("core", "def foo( # bad", "broken")
+
+        assert "syntax error" in result.lower()
+        assert "core" not in core_cap._staged_changes
+
+    def test_modify_module_rejects_immutable(self, core_cap):
+        """Test cannot modify immutable modules."""
+        # Currently no immutable modules, but test the mechanism
+        from agentself.capabilities import core_source
+        original = core_source.IMMUTABLE_MODULES.copy()
+        core_source.IMMUTABLE_MODULES["test"] = "test.py"
+
+        try:
+            result = core_cap.modify_module("test", "code", "desc")
+            assert "immutable" in result.lower()
+        finally:
+            core_source.IMMUTABLE_MODULES.clear()
+            core_source.IMMUTABLE_MODULES.update(original)
+
+    def test_diff_module_shows_changes(self, core_cap, temp_source):
+        """Test diff_module shows unified diff."""
+        original = core_cap.read_module("core")
+        new_source = original + "\nNEW_LINE = True"
+        core_cap.modify_module("core", new_source, "Add new line")
+
+        diff = core_cap.diff_module("core")
+
+        assert "+NEW_LINE = True" in diff
+        assert "core.py" in diff
+
+    def test_staged_changes_shows_summary(self, core_cap, temp_source):
+        """Test staged_changes shows summary."""
+        original = core_cap.read_module("core")
+        core_cap.modify_module("core", original + "\n# change", "test")
+
+        result = core_cap.staged_changes()
+
+        assert "core.py" in result
+        assert "not tested" in result
+
+    def test_rollback_staged_discards_change(self, core_cap, temp_source):
+        """Test rollback_staged discards a staged change."""
+        original = core_cap.read_module("core")
+        core_cap.modify_module("core", original + "\n# change", "test")
+
+        assert "core" in core_cap._staged_changes
+
+        result = core_cap.rollback_staged("core")
+
+        assert "discarded" in result.lower()
+        assert "core" not in core_cap._staged_changes
+
+
+class TestCoreSourceCapabilityTesting:
+    """Tests for CoreSourceCapability subprocess testing."""
+
+    @pytest.fixture
+    def core_cap(self):
+        """Create CoreSourceCapability with real source."""
+        return CoreSourceCapability(source_dir=Path("src/agentself"))
+
+    def test_test_module_validates_in_subprocess(self, core_cap):
+        """Test that test_module runs validation in subprocess."""
+        original = core_cap.read_module("core")
+        # Make a small valid change
+        new_source = original + "\n# Test comment added\n"
+        core_cap.modify_module("core", new_source, "Add comment")
+
+        result = core_cap.test_module("core")
+
+        # Should pass since it's valid Python that imports correctly
+        assert "Syntax: valid" in result
+
+    def test_modify_module_catches_syntax_error(self, core_cap):
+        """Test that modify_module catches syntax errors at staging time."""
+        result = core_cap.modify_module("core", "def foo( # broken syntax", "broken")
+
+        # Syntax errors are caught at staging time, not test time
+        assert "syntax error" in result.lower()
+        assert "core" not in core_cap._staged_changes
+
+    def test_test_module_without_staged_returns_error(self, core_cap):
+        """Test test_module without staged change returns error."""
+        result = core_cap.test_module("core")
+
+        assert "No staged changes" in result
+
+
+class TestCoreSourceCapabilityVersioning:
+    """Tests for CoreSourceCapability version management."""
+
+    @pytest.fixture
+    def temp_source(self, tmp_path):
+        """Create a temporary source directory."""
+        src_dir = tmp_path / "agentself"
+        src_dir.mkdir()
+
+        (src_dir / "core.py").write_text('"""Core."""\nVERSION = 1\n')
+
+        return src_dir
+
+    @pytest.fixture
+    def core_cap(self, temp_source, tmp_path):
+        """Create CoreSourceCapability with temp directories."""
+        return CoreSourceCapability(
+            source_dir=temp_source,
+            versions_dir=tmp_path / "versions",
+        )
+
+    def test_modify_saves_original_version(self, core_cap, temp_source):
+        """Test that modify_module saves original for rollback."""
+        original = core_cap.read_module("core")
+        core_cap.modify_module("core", original + "\nVERSION = 2", "bump version")
+
+        versions = core_cap._version_history.get("core", [])
+        assert len(versions) == 1
+        assert "VERSION = 1" in versions[0].source
+
+    def test_list_versions_shows_history(self, core_cap, temp_source):
+        """Test list_versions shows version history."""
+        original = core_cap.read_module("core")
+        core_cap.modify_module("core", original + "\n# v2", "version 2")
+
+        result = core_cap.list_versions("core")
+
+        assert "[0]" in result  # Version index
+        assert "Before staged" in result
+
+    def test_list_versions_unknown_module_returns_error(self, core_cap):
+        """Test list_versions with unknown module returns error."""
+        result = core_cap.list_versions("nonexistent")
+
+        assert "Unknown module" in result
+
+
+class TestCoreSourceCapabilityApply:
+    """Tests for CoreSourceCapability apply operations."""
+
+    @pytest.fixture
+    def temp_source(self, tmp_path):
+        """Create a temporary source directory."""
+        src_dir = tmp_path / "agentself"
+        src_dir.mkdir()
+        cap_dir = src_dir / "capabilities"
+        cap_dir.mkdir()
+        (cap_dir / "__init__.py").write_text("")
+        (cap_dir / "base.py").write_text('class Capability: pass')
+
+        (src_dir / "core.py").write_text('"""Core."""\nOLD = True\n')
+
+        return src_dir
+
+    @pytest.fixture
+    def core_cap(self, temp_source, tmp_path):
+        """Create CoreSourceCapability with temp directories."""
+        return CoreSourceCapability(
+            source_dir=temp_source,
+            versions_dir=tmp_path / "versions",
+        )
+
+    def test_apply_without_test_requires_force(self, core_cap, temp_source):
+        """Test apply_module without testing requires force flag."""
+        original = core_cap.read_module("core")
+        core_cap.modify_module("core", original + "\nNEW = True", "add new")
+
+        result = core_cap.apply_module("core")
+
+        assert "not been tested" in result
+
+    def test_apply_with_force_writes_file(self, core_cap, temp_source):
+        """Test apply_module with force writes to disk."""
+        original = core_cap.read_module("core")
+        new_source = original + "\nNEW = True"
+        core_cap.modify_module("core", new_source, "add new")
+
+        result = core_cap.apply_module("core", force=True)
+
+        assert "updated on disk" in result
+        assert "restart" in result.lower()
+
+        # Verify file was updated
+        content = (temp_source / "core.py").read_text()
+        assert "NEW = True" in content
+
+    def test_apply_clears_staged_change(self, core_cap, temp_source):
+        """Test apply_module clears the staged change."""
+        original = core_cap.read_module("core")
+        core_cap.modify_module("core", original + "\nX = 1", "add x")
+
+        assert "core" in core_cap._staged_changes
+
+        core_cap.apply_module("core", force=True)
+
+        assert "core" not in core_cap._staged_changes
+
+
+class TestCoreSourceCapabilityDescribe:
+    """Tests for CoreSourceCapability describe method."""
+
+    def test_describe_shows_all_methods(self):
+        """Test describe shows all methods."""
+        cap = CoreSourceCapability()
+        desc = cap.describe()
+
+        # Introspection
+        assert "list_modules" in desc
+        assert "read_module" in desc
+        assert "describe_module" in desc
+
+        # Staging
+        assert "modify_module" in desc
+        assert "diff_module" in desc
+        assert "staged_changes" in desc
+
+        # Testing
+        assert "test_module" in desc
+
+        # Apply
+        assert "apply_module" in desc
+
+        # Versioning
+        assert "list_versions" in desc
+        assert "rollback_to_version" in desc
+
+
+class TestCoreSourceCapabilityContract:
+    """Tests for CoreSourceCapability contract."""
+
+    def test_contract_declares_spawns(self):
+        """Test contract declares it can spawn subprocess."""
+        cap = CoreSourceCapability()
+        contract = cap.contract()
+
+        assert contract.spawns is True
+
+    def test_contract_declares_file_access(self):
+        """Test contract declares file read/write."""
+        cap = CoreSourceCapability()
+        contract = cap.contract()
+
+        assert len(contract.reads) > 0
+        assert len(contract.writes) > 0
+
+    def test_contract_declares_subprocess_execution(self):
+        """Test contract declares subprocess execution."""
+        cap = CoreSourceCapability()
+        contract = cap.contract()
+
+        assert any("subprocess" in e for e in contract.executes)

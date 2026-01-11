@@ -24,6 +24,7 @@ import anthropic
 
 from agentself.capabilities.base import Capability
 from agentself.capabilities.command_line import CommandLineCapability
+from agentself.capabilities.core_source import CoreSourceCapability
 from agentself.capabilities.file_system import FileSystemCapability
 from agentself.capabilities.self_source import SelfSourceCapability
 from agentself.capabilities.user_communication import UserCommunicationCapability
@@ -128,8 +129,14 @@ class SandboxedAgent:
             handler.allow("fs", "list")
             handler.allow("fs", "exists")
             handler.allow("self")  # Allow all self-introspection
+            handler.allow("core", "list_modules")  # Allow core introspection
+            handler.allow("core", "list_immutable")
+            handler.allow("core", "read_module")
+            handler.allow("core", "describe_module")
+            handler.allow("core", "get_module_hash")
+            handler.allow("core", "list_versions")
             handler.allow("user")  # Allow user communication
-            # Writes and commands need explicit approval
+            # Writes, commands, and core modifications need explicit approval
         else:
             handler = AutoApproveHandler()
 
@@ -137,6 +144,7 @@ class SandboxedAgent:
             "fs": FileSystemCapability(allowed_paths=[Path.cwd()]),
             "user": UserCommunicationCapability(),
             "self": SelfSourceCapability(source_dir=Path("src/agentself")),
+            "core": CoreSourceCapability(source_dir=Path("src/agentself")),
             "cmd": CommandLineCapability(
                 allowed_commands=["ls", "cat", "head", "tail", "grep", "find", "echo", "pwd"]
             ),
@@ -196,6 +204,7 @@ class SandboxedAgent:
             "fs": FileSystemCapability(allowed_paths=[Path(p) for p in allowed_paths]),
             "user": UserCommunicationCapability(),
             "self": SelfSourceCapability(source_dir=Path("src/agentself")),
+            "core": CoreSourceCapability(source_dir=Path("src/agentself")),
             "cmd": CommandLineCapability(allowed_commands=allowed_commands),
         }
 
@@ -603,6 +612,58 @@ self.commit_capability("my_cap")
 2. `test_capability()` - Verify it works
 3. `reload_capability()` - Install into sandbox
 4. `commit_capability()` - Save to disk
+
+## Core Modification: Evolving the Infrastructure
+
+Beyond capabilities, you can also modify the agent's core infrastructure (agent.py, sandbox.py, core.py, etc.) using the `core` capability. This is Layer 1 modification - more powerful but requires restart.
+
+### Introspection
+- `core.list_modules()` - See modifiable core modules
+- `core.read_module("agent")` - Read a core module's source
+- `core.describe_module("sandbox")` - Get summary of a module
+
+### Modifying Core
+```python
+# Read current source
+source = core.read_module("sandbox")
+
+# Make modifications
+new_source = source.replace("old_code", "new_code")
+
+# Stage the change
+core.modify_module("sandbox", new_source, "Add new feature X")
+
+# See the diff
+core.diff_module("sandbox")
+```
+
+### Testing Core Changes (Critical!)
+Core changes are tested in isolated subprocesses:
+```python
+# Test in subprocess (won't affect running agent)
+core.test_module("sandbox")
+
+# Test with custom assertions
+core.test_module("sandbox", "assert hasattr(Sandbox, 'new_method')")
+```
+
+### Applying & Rollback
+```python
+# Apply to disk (REQUIRES RESTART)
+core.apply_module("sandbox")
+
+# View version history
+core.list_versions("sandbox")
+
+# Rollback if needed
+core.rollback_to_version("sandbox", 0)
+```
+
+### Key Differences from Capability Modification
+- Core changes CANNOT be hot-reloaded (require restart)
+- Testing happens in subprocess (fork-exec pattern)
+- Automatic versioning with rollback support
+- Higher security requirements
 
 ## State Persistence
 
