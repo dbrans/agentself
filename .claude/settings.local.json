@@ -18,7 +18,8 @@
       "Bash(git mv:*)",
       "Bash(python -c:*)",
       "Bash(pip install:*)",
-      "Bash(timeout 2 uv run:*)"
+      "Bash(timeout 2 uv run:*)",
+      "Bash(timeout 3 uv run:*)"
     ]
   }
 }

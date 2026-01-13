@@ -16,9 +16,12 @@ Usage:
 
 from agentself.harness.repl import REPLSubprocess
 from agentself.harness.server import create_server, main
+from agentself.harness.state import StateManager, SavedState
 
 __all__ = [
     "REPLSubprocess",
     "create_server",
     "main",
+    "StateManager",
+    "SavedState",
 ]
