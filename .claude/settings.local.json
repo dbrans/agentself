@@ -13,7 +13,12 @@
       "Bash(python -m pytest:*)",
       "Bash(source .venv/bin/activate)",
       "Bash(xargs:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(git mv:*)",
+      "Bash(python -c:*)",
+      "Bash(pip install:*)",
+      "Bash(timeout 2 uv run:*)"
     ]
   }
 }

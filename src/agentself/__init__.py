@@ -1,113 +1,45 @@
-"""AgentSelf: A capability-based self-improving agent framework.
+"""AgentSelf: A capability-based agent framework.
 
 This package provides:
-- A sandboxed execution environment with two-phase execution
-- A capability system for controlled access to external resources
-- Capability contracts for declaring potential side effects
-- Permission handling for human-in-the-loop oversight
-- Self-modification capabilities for runtime agent improvement
-- A capability loader for discovering and installing capabilities
+- Capability protocol for controlled access to external resources
+- FileSystemCapability: Scoped file read/write
+- CommandLineCapability: Shell command execution with allowlists
 
-Key Components:
-- Sandbox: Restricted Python execution with capability injection
-- Capability: Base class for controlled resource access
-- CapabilityContract: Declares what a capability might do
-- CapabilityLoader: Meta-capability for installing other capabilities
-- SandboxedAgent: LLM-powered agent with code execution
-- Permission handlers: Auto-approve, interactive, policy-based
+The Bootstrap REPL (in agentself.harness) provides:
+- FastMCP server for integration with coding agents (Claude Code, etc.)
+- Persistent Python REPL with capability injection
+- MCP hub for connecting to backend MCP servers
+- State persistence across sessions
 
 Example:
-    from agentself import SandboxedAgent
+    # Start the REPL harness
+    python -m agentself.harness
 
-    agent = SandboxedAgent()
-    response = agent.chat("List all Python files in the current directory")
-    print(response)
+    # Or use capabilities directly
+    from agentself import FileSystemCapability, CommandLineCapability
+
+    fs = FileSystemCapability(allowed_paths=["./src"])
+    print(fs.read("./src/main.py"))
 """
 
-from agentself.agent import (
-    AgentConfig,
-    ConversationTurn,
-    Message,
-    SandboxedAgent,
-)
 from agentself.capabilities import (
     Capability,
-    CapabilityLoader,
-    CapabilityManifest,
     CommandLineCapability,
     FileSystemCapability,
-    SelfSourceCapability,
-    UserCommunicationCapability,
 )
 from agentself.core import (
-    CapabilityCall,
     CapabilityContract,
-    DependencyInfo,
-    ExecutionMode,
-    ExecutionPlan,
     ExecutionResult,
-    PermissionStrategy,
-)
-from agentself.permissions import (
-    AutoApproveHandler,
-    AutoDenyHandler,
-    CompositeHandler,
-    InteractiveHandler,
-    PermissionDecision,
-    PermissionHandler,
-    PermissionRequest,
-    PermissionRule,
-    PolicyHandler,
-)
-from agentself.proxy import (
-    CallRecorder,
-    CapabilityProxy,
-    ProxyFactory,
-)
-from agentself.sandbox import (
-    Sandbox,
-    SAFE_BUILTINS,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
-    # Agent
-    "SandboxedAgent",
-    "AgentConfig",
-    "Message",
-    "ConversationTurn",
-    # Sandbox
-    "Sandbox",
-    "SAFE_BUILTINS",
     # Core types
-    "CapabilityCall",
     "CapabilityContract",
-    "ExecutionPlan",
     "ExecutionResult",
-    "ExecutionMode",
-    "PermissionStrategy",
-    "DependencyInfo",
     # Capabilities
     "Capability",
-    "CapabilityLoader",
-    "CapabilityManifest",
     "FileSystemCapability",
     "CommandLineCapability",
-    "UserCommunicationCapability",
-    "SelfSourceCapability",
-    # Permissions
-    "PermissionHandler",
-    "PermissionRequest",
-    "PermissionDecision",
-    "PermissionRule",
-    "AutoApproveHandler",
-    "AutoDenyHandler",
-    "InteractiveHandler",
-    "PolicyHandler",
-    "CompositeHandler",
-    # Proxy
-    "CapabilityProxy",
-    "CallRecorder",
-    "ProxyFactory",
 ]
