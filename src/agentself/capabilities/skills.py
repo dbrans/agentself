@@ -21,16 +21,16 @@ class SkillsCapability(Capability):
 
     def __init__(
         self,
-        root: Path | str | None = None,
+        root: Path | str | Iterable[Path | str] | None = None,
         allowed_commands: Iterable[str] | None = None,
     ) -> None:
         self.registry = SkillRegistry(root=root)
-        self.root = self.registry.root
-        self.fs = FileSystemCapability(allowed_paths=[self.root], read_only=True)
+        self.roots = self.registry.roots
+        self.fs = FileSystemCapability(allowed_paths=self.roots, read_only=True)
         self.cmd = CommandLineCapability(
             allowed_commands=list(allowed_commands or DEFAULT_SKILL_COMMANDS),
-            allowed_paths=[self.root],
-            allowed_cwd=[self.root],
+            allowed_paths=self.roots,
+            allowed_cwd=self.roots,
             deny_shell_operators=True,
         )
 

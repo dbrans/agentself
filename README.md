@@ -49,6 +49,7 @@ Notes:
 ## Skills
 
 Skills live under `skills/` with a `SKILL.md` per skill (YAML frontmatter for metadata).
+Set `AGENTSELF_SKILLS_DIRS` (path-separated) to add more roots.
 
 In the REPL (safe profile), use:
 - `skills.list()` for metadata

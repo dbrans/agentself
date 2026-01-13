@@ -6,13 +6,25 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
 
 def _default_skills_root() -> Path:
+    return Path(__file__).resolve().parents[2] / "skills"
+
+
+def _default_skill_roots() -> list[Path]:
+    env_roots = os.environ.get("AGENTSELF_SKILLS_DIRS")
+    if env_roots:
+        roots = [p for p in env_roots.split(os.pathsep) if p.strip()]
+        if roots:
+            return [Path(p).expanduser().resolve() for p in roots]
+
     env_root = os.environ.get("AGENTSELF_SKILLS_DIR")
     if env_root:
-        return Path(env_root).expanduser()
-    return Path(__file__).resolve().parents[2] / "skills"
+        return [Path(env_root).expanduser().resolve()]
+
+    return [_default_skills_root().resolve()]
 
 
 @dataclass
@@ -45,25 +57,36 @@ def _read_frontmatter(path: Path) -> dict[str, str]:
 class SkillRegistry:
     """Discover and load skills from disk."""
 
-    def __init__(self, root: Path | str | None = None) -> None:
-        self.root = Path(root) if root else _default_skills_root()
-        self.root = self.root.expanduser().resolve()
+    def __init__(self, root: Path | str | Iterable[Path | str] | None = None) -> None:
+        if root is None:
+            roots = _default_skill_roots()
+        elif isinstance(root, (str, Path)):
+            roots = [Path(root).expanduser().resolve()]
+        else:
+            roots = [Path(p).expanduser().resolve() for p in root]
+
+        self.roots = [p for p in roots if str(p).strip()]
+        if not self.roots:
+            self.roots = _default_skill_roots()
+        self.root = self.roots[0]
 
     def list(self) -> list[SkillMeta]:
         """List available skills (metadata only)."""
-        if not self.root.exists():
-            return []
-
-        skills = []
-        for skill_dir in sorted(self.root.iterdir()):
-            skill_file = skill_dir / "SKILL.md"
-            if not skill_file.is_file():
+        skills: dict[str, SkillMeta] = {}
+        for root in self.roots:
+            if not root.exists():
                 continue
-            meta = _read_frontmatter(skill_file)
-            name = meta.get("name") or skill_dir.name
-            description = meta.get("description") or ""
-            skills.append(SkillMeta(name=name, description=description, path=skill_file))
-        return skills
+            for skill_dir in sorted(root.iterdir()):
+                skill_file = skill_dir / "SKILL.md"
+                if not skill_file.is_file():
+                    continue
+                meta = _read_frontmatter(skill_file)
+                name = meta.get("name") or skill_dir.name
+                if name in skills:
+                    continue
+                description = meta.get("description") or ""
+                skills[name] = SkillMeta(name=name, description=description, path=skill_file)
+        return list(skills.values())
 
     def show(self, name: str) -> str:
         """Return the full skill text."""

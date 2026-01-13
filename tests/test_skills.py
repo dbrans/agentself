@@ -1,5 +1,6 @@
 """Tests for skills registry."""
 
+import os
 from pathlib import Path
 
 from agentself.skills import SkillRegistry
@@ -42,3 +43,26 @@ def test_skill_registry_root_from_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("AGENTSELF_SKILLS_DIR", str(tmp_path))
     registry = SkillRegistry()
     assert registry.root == tmp_path.resolve()
+
+
+def test_skill_registry_roots_from_env(tmp_path: Path, tmp_path_factory, monkeypatch) -> None:
+    other_root = tmp_path_factory.mktemp("skills2")
+    monkeypatch.setenv(
+        "AGENTSELF_SKILLS_DIRS",
+        f"{tmp_path}{os.pathsep}{other_root}",
+    )
+    registry = SkillRegistry()
+    assert registry.roots == [tmp_path.resolve(), other_root.resolve()]
+
+
+def test_skill_registry_root_precedence(tmp_path: Path, tmp_path_factory) -> None:
+    root_a = tmp_path / "a"
+    root_b = tmp_path_factory.mktemp("skills_b")
+    _write_skill(root_a, "dup", "First")
+    _write_skill(root_b, "dup", "Second")
+
+    registry = SkillRegistry(root=[root_a, root_b])
+    skills = registry.list()
+
+    assert skills[0].name == "dup"
+    assert skills[0].description == "First"
