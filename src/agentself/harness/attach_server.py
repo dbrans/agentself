@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import socketserver
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from agentself.harness.logging_utils import abbreviate
 from agentself.harness.runtime import HarnessRuntime
+
+logger = logging.getLogger(__name__)
 
 
 class AttachRequestHandler(socketserver.StreamRequestHandler):
@@ -21,11 +26,36 @@ class AttachRequestHandler(socketserver.StreamRequestHandler):
             try:
                 request = json.loads(line.decode("utf-8").strip())
             except json.JSONDecodeError as exc:
+                logger.warning("invalid json error=%s", exc)
                 response = {"success": False, "error": f"Invalid JSON: {exc}"}
                 self._send_response(response)
                 continue
 
-            response = self.server.dispatch(request)  # type: ignore[attr-defined]
+            op = request.get("op")
+            wait = request.get("wait", False)
+            detail = ""
+            if op == "execute":
+                detail = f" code={abbreviate(request.get('code', ''))}"
+            elif op == "describe_capability":
+                detail = f" name={request.get('name', '')}"
+
+            logger.debug("request op=%s wait=%s%s", op, wait, detail)
+            start = time.perf_counter()
+            try:
+                response = self.server.dispatch(request)  # type: ignore[attr-defined]
+            except Exception:
+                logger.exception("dispatch failed op=%s", op)
+                response = {"success": False, "error": "Dispatch failed"}
+            duration_ms = int((time.perf_counter() - start) * 1000)
+            if response.get("success", True):
+                logger.debug("response op=%s success=True duration_ms=%s", op, duration_ms)
+            else:
+                logger.debug(
+                    "response op=%s success=False duration_ms=%s error=%s",
+                    op,
+                    duration_ms,
+                    abbreviate(str(response.get("error", ""))),
+                )
             self._send_response(response)
 
     def _send_response(self, response: dict[str, Any]) -> None:
@@ -57,6 +87,7 @@ class AttachServerBase:
             "import_state",
         }:
             if not self.runtime.acquire(wait=wait, timeout=timeout):
+                logger.debug("reject op=%s reason=busy wait=%s timeout=%s", op, wait, timeout)
                 return {"success": False, "error": "REPL busy"}
             try:
                 return self._dispatch_locked(op, request)

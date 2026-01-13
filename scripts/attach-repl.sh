@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SOCKET_PATH=${1:-"$HOME/.agentself/repl.sock"}
-EXTRA_ARGS=("${@:2}")
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-uv run agentself-attach --socket "$SOCKET_PATH" "${EXTRA_ARGS[@]}"
+SOCKET_PATH=${1:-"$HOME/.agentself/repl.sock"}
+CACHE_ROOT=${XDG_CACHE_HOME:-"$REPO_ROOT/_tmp/uv-cache"}
+
+if [ "$#" -ge 1 ]; then
+  shift 1
+fi
+
+mkdir -p "$CACHE_ROOT"
+
+XDG_CACHE_HOME="$CACHE_ROOT" UV_CACHE_DIR="$CACHE_ROOT/uv" uv run agentself-attach --socket "$SOCKET_PATH" "$@"

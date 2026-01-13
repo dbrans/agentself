@@ -4,6 +4,7 @@ import json
 import socket
 import tempfile
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -634,6 +635,40 @@ class TestAttachServer:
 
             assert response["success"] is False
             assert "busy" in response["error"].lower()
+        finally:
+            runtime.release()
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1)
+            runtime.close()
+
+    def test_attach_wait(self):
+        """Test that attach waits for the REPL when requested."""
+        runtime = create_runtime()
+        server, address = self._tcp_server(runtime)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+
+        runtime.acquire(wait=True)
+        try:
+            def release_lock():
+                time.sleep(0.2)
+                runtime.release()
+
+            release_thread = threading.Thread(target=release_lock, daemon=True)
+            release_thread.start()
+
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.connect(address)
+                sock_file = sock.makefile("rw", encoding="utf-8")
+                sock_file.write(
+                    json.dumps({"op": "state", "wait": True, "timeout": 1.0}) + "\n"
+                )
+                sock_file.flush()
+                response = json.loads(sock_file.readline())
+
+            assert response["defined_functions"] == []
+            assert response["history_length"] >= 0
         finally:
             runtime.release()
             server.shutdown()

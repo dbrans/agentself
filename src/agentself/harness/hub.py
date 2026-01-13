@@ -7,6 +7,7 @@ and making tool calls on behalf of the REPL.
 from __future__ import annotations
 
 import asyncio
+import logging
 import shlex
 from dataclasses import dataclass, field
 from typing import Any
@@ -14,6 +15,7 @@ from typing import Any
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ToolSpec:
@@ -79,6 +81,7 @@ class MCPHub:
             )
 
             try:
+                logger.info("mcp install name=%s command=%s", name, command)
                 # Connect to the server
                 read, write = await asyncio.wait_for(
                     stdio_client(server_params).__aenter__(),
@@ -101,6 +104,7 @@ class MCPHub:
                     session=session,
                 )
 
+                logger.info("mcp installed name=%s tools=%s", name, list(tools.keys()))
                 return list(tools.values())
 
             except asyncio.TimeoutError:
@@ -136,6 +140,7 @@ class MCPHub:
             )
 
         try:
+            logger.debug("mcp call capability=%s method=%s kwargs=%s", capability, method, kwargs)
             result = await backend.session.call_tool(method, kwargs)
             # Extract content from result
             if hasattr(result, "content") and result.content:
@@ -146,6 +151,7 @@ class MCPHub:
                 return str(result.content)
             return result
         except Exception as e:
+            logger.exception("mcp call failed capability=%s method=%s", capability, method)
             raise RuntimeError(f"{capability}.{method} failed: {e}")
 
     async def uninstall(self, name: str) -> bool:
@@ -163,6 +169,7 @@ class MCPHub:
 
             backend = self.backends.pop(name)
             try:
+                logger.info("mcp uninstall name=%s", name)
                 await backend.session.__aexit__(None, None, None)
             except Exception:
                 pass  # Best effort cleanup

@@ -225,3 +225,50 @@ class TestCommandLineCapability:
             cap.run("echo safe && whoami")
 
         assert "Shell operators" in str(exc.value)
+
+    def test_allowed_paths_blocks_absolute_path(self, tmp_path):
+        """Test that absolute path args are blocked outside allowed_paths."""
+        cap = CommandLineCapability(
+            allowed_commands=["ls"],
+            allowed_cwd=[tmp_path],
+            allowed_paths=[tmp_path],
+        )
+
+        with pytest.raises(PermissionError) as exc:
+            cap.run("ls /", cwd=str(tmp_path))
+
+        assert "Path argument not allowed" in str(exc.value)
+
+    def test_allowed_paths_blocks_parent_traversal(self, tmp_path):
+        """Test that parent traversal is blocked."""
+        cap = CommandLineCapability(
+            allowed_commands=["ls"],
+            allowed_cwd=[tmp_path],
+            allowed_paths=[tmp_path],
+        )
+
+        with pytest.raises(PermissionError) as exc:
+            cap.run("ls ../", cwd=str(tmp_path))
+
+        assert "Path argument not allowed" in str(exc.value)
+
+    def test_allowed_paths_allows_relative_inside(self, tmp_path):
+        """Test that relative path args inside allowed_paths are allowed."""
+        (tmp_path / "file.txt").write_text("ok")
+        cap = CommandLineCapability(
+            allowed_commands=["ls"],
+            allowed_cwd=[tmp_path],
+            allowed_paths=[tmp_path],
+        )
+
+        result = cap.run("ls file.txt", cwd=str(tmp_path))
+
+        assert result.exit_code == 0
+
+    def test_contract_includes_allowed_paths(self, tmp_path):
+        """Test that contract reflects allowed_paths."""
+        cap = CommandLineCapability(allowed_paths=[tmp_path])
+        contract = cap.contract()
+
+        assert any("file:" in entry for entry in contract.reads)
+        assert any("file:" in entry for entry in contract.writes)

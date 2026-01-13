@@ -7,6 +7,7 @@ Integrates with backend MCP servers via the hub.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 import threading
 from dataclasses import asdict
@@ -17,9 +18,12 @@ from fastmcp import FastMCP
 
 from agentself.harness.attach_server import AttachServer
 from agentself.harness.bootstrap import bootstrap_safe
+from agentself.harness.logging_utils import abbreviate, configure_logging
 from agentself.harness.repl import REPLSubprocess
 from agentself.harness.runtime import HarnessRuntime, get_runtime
 from agentself.harness.state import SavedState, SavedCapability
+
+logger = logging.getLogger(__name__)
 
 
 def create_server(
@@ -73,9 +77,15 @@ def create_server(
             # Use an installed capability
             execute("files = fs.list('*.py')")
         """
+        logger.debug("execute code=%s", abbreviate(code))
         runtime.acquire()
         try:
             result = repl.execute(code)
+            logger.debug(
+                "execute result success=%s error_type=%s",
+                result.success,
+                result.error_type,
+            )
             return asdict(result)
         finally:
             runtime.release()
@@ -91,6 +101,7 @@ def create_server(
             - capabilities: List of registered capability names
             - history_length: Number of code blocks executed
         """
+        logger.debug("state requested")
         runtime.acquire()
         try:
             result = repl.state()
@@ -114,6 +125,7 @@ def create_server(
         Returns:
             Dict with success status and capability name or error.
         """
+        logger.info("register capability name=%s", name)
         runtime.acquire()
         try:
             result = repl.register_capability(name)
@@ -150,6 +162,7 @@ def create_server(
             # Then use it in the REPL
             execute("files = fs.list_directory('.')")
         """
+        logger.info("install capability name=%s command=%s", name, command)
         runtime.acquire()
         try:
             # Connect to MCP server and get tools
@@ -165,6 +178,7 @@ def create_server(
             success = repl.inject_relay_capability(name, tool_specs)
 
             if success:
+                logger.info("installed capability name=%s tools=%s", name, [t.name for t in tools])
                 return {
                     "success": True,
                     "capability_name": name,
@@ -176,6 +190,7 @@ def create_server(
                 return {"success": False, "error": "Failed to inject capability into REPL"}
 
         except Exception as e:
+            logger.exception("install capability failed name=%s", name)
             return {"success": False, "error": str(e)}
         finally:
             runtime.release()
@@ -193,6 +208,7 @@ def create_server(
         Returns:
             Dict with success status.
         """
+        logger.info("uninstall capability name=%s", name)
         runtime.acquire()
         try:
             success = await hub.uninstall(name)
@@ -210,6 +226,7 @@ def create_server(
             - type: "native" or "relay"
             - description: Capability description
         """
+        logger.debug("list capabilities")
         runtime.acquire()
         try:
             return repl.list_capabilities()
@@ -229,6 +246,7 @@ def create_server(
             - description: Full capability documentation
             - error: Error message if not found
         """
+        logger.debug("describe capability name=%s", name)
         runtime.acquire()
         try:
             result = repl.execute(f"{name}.describe()")
@@ -257,6 +275,7 @@ def create_server(
             - summary: What was saved (counts)
             - error: Error message if failed
         """
+        logger.info("save state name=%s", name)
         runtime.acquire()
         try:
             # Export state from REPL
@@ -303,6 +322,7 @@ def create_server(
 
             # Save to disk
             path = state_manager.save(state, name)
+            logger.info("saved state name=%s path=%s", name, path)
 
             return {
                 "success": True,
@@ -315,6 +335,7 @@ def create_server(
                 },
             }
         except Exception as e:
+            logger.exception("save state failed name=%s", name)
             return {"success": False, "error": str(e)}
         finally:
             runtime.release()
@@ -335,6 +356,7 @@ def create_server(
             - summary: What was restored (counts and any failures)
             - error: Error message if failed
         """
+        logger.info("restore state name=%s", name)
         runtime.acquire()
         try:
             # Load state from disk
@@ -404,6 +426,7 @@ def create_server(
                 },
             }
         except Exception as e:
+            logger.exception("restore state failed name=%s", name)
             return {"success": False, "error": str(e)}
         finally:
             runtime.release()
@@ -415,6 +438,7 @@ def create_server(
         Returns:
             Dict with list of state names.
         """
+        logger.debug("list saved states")
         runtime.acquire()
         try:
             return {"states": state_manager.list_states()}
@@ -431,6 +455,7 @@ def create_server(
         Returns:
             Dict with success status.
         """
+        logger.info("reset repl")
         runtime.acquire()
         try:
             # Close hub connections
@@ -440,6 +465,7 @@ def create_server(
             repl.close()
             runtime.repl = REPLSubprocess(relay_handler=runtime.relay_handler)
 
+            logger.info("reset repl completed")
             return {"success": True, "message": "REPL reset to clean state"}
         finally:
             runtime.release()
@@ -482,13 +508,31 @@ def main():
         help="Allowlisted shell command (repeatable)",
     )
     parser.add_argument("--attach-socket", default=None, help="Unix socket path for attach server")
+    parser.add_argument(
+        "--log-level",
+        default=None,
+        help="Log level (overrides AGENTSELF_LOG_LEVEL).",
+    )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Log file path (defaults to stderr).",
+    )
 
     args = parser.parse_args()
+
+    configure_logging(args.log_level, args.log_file)
 
     runtime = get_runtime()
 
     if args.profile == "safe":
         safe_root = Path(args.safe_root or "~/.agentself/sandboxes/safe").expanduser()
+        logger.info(
+            "bootstrap safe profile root=%s seed=%s allow_cmd=%s",
+            safe_root,
+            args.seed,
+            args.allowed_commands,
+        )
         bootstrap_safe(
             runtime,
             safe_root,
@@ -501,6 +545,7 @@ def main():
         attach_server = AttachServer(socket_path, runtime)
         thread = threading.Thread(target=attach_server.serve_forever, daemon=True)
         thread.start()
+        logger.info("attach server listening socket=%s", socket_path)
         print(f"[agentself] attach server on {socket_path}", file=sys.stderr)
 
     server = get_server(runtime)

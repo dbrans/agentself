@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -11,6 +12,7 @@ from agentself.harness.hub import MCPHub
 from agentself.harness.repl import REPLSubprocess
 from agentself.harness.state import StateManager
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class HarnessRuntime:
@@ -64,6 +66,7 @@ def create_runtime() -> HarnessRuntime:
 
     def relay_handler(capability: str, method: str, kwargs: dict) -> Any:
         """Handle relay calls from the REPL by forwarding to MCP hub."""
+        logger.debug("relay call capability=%s method=%s kwargs=%s", capability, method, kwargs)
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(hub.call(capability, method, kwargs))

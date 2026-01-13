@@ -47,6 +47,7 @@ def bootstrap_safe(
         cmd = CommandLineCapability(
             allowed_commands={commands_literal},
             allowed_cwd=[{root_literal}],
+            allowed_paths=[{root_literal}],
             deny_shell_operators=True,
         )
         """
