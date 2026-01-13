@@ -20,9 +20,11 @@ Archived capabilities (in agentself._archive.capabilities):
 from agentself.capabilities.base import Capability
 from agentself.capabilities.command_line import CommandLineCapability
 from agentself.capabilities.file_system import FileSystemCapability
+from agentself.capabilities.skills import SkillsCapability
 
 __all__ = [
     "Capability",
     "CommandLineCapability",
     "FileSystemCapability",
+    "SkillsCapability",
 ]

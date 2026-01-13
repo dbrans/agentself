@@ -36,3 +36,9 @@ def test_missing_skill_raises(tmp_path: Path) -> None:
         registry.show("missing")
     except FileNotFoundError as exc:
         assert "missing" in str(exc)
+
+
+def test_skill_registry_root_from_env(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENTSELF_SKILLS_DIR", str(tmp_path))
+    registry = SkillRegistry()
+    assert registry.root == tmp_path.resolve()
