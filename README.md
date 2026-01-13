@@ -45,6 +45,7 @@ Notes:
 - Enable logging with `AGENTSELF_LOG_LEVEL=DEBUG` (or pass `--log-level debug`).
 - Debug logs include REPL execs and capability calls (fs/cmd + MCP relay).
 - Attach supports line editing + history; Shift-Enter for new lines when `prompt_toolkit` is installed.
+- Background logs are timestamped under `_tmp/agentself-*.log`.
 
 ## Skills
 

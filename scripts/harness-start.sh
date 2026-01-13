@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SOCKET_PATH=${1:-"$HOME/.agentself/repl.sock"}
 SAFE_ROOT=${2:-"$HOME/.agentself/sandboxes/safe"}
-LOG_FILE=${3:-"$REPO_ROOT/_tmp/agentself.log"}
+LOG_FILE=${3:-""}
 PID_FILE=${4:-"$REPO_ROOT/_tmp/agentself.pid"}
 OUT_FILE=${HARNESS_STDOUT:-"$REPO_ROOT/_tmp/harness.out"}
 
@@ -18,6 +18,11 @@ elif [ "$#" -eq 2 ]; then
   shift 2
 elif [ "$#" -eq 1 ]; then
   shift 1
+fi
+
+if [ -z "$LOG_FILE" ]; then
+  TS="$(date +"%Y%m%d-%H%M%S")"
+  LOG_FILE="$REPO_ROOT/_tmp/agentself-$TS.log"
 fi
 
 mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$PID_FILE")" "$(dirname "$OUT_FILE")"
