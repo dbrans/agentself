@@ -6,18 +6,26 @@ Integrates with backend MCP servers via the hub.
 
 from __future__ import annotations
 
-import asyncio
+import argparse
+import sys
+import threading
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
 
-from agentself.harness.hub import MCPHub
-from agentself.harness.repl import REPLSubprocess, ExecutionResult, REPLState
-from agentself.harness.state import StateManager, SavedState, SavedCapability
+from agentself.harness.attach_server import AttachServer
+from agentself.harness.bootstrap import bootstrap_safe
+from agentself.harness.repl import REPLSubprocess
+from agentself.harness.runtime import HarnessRuntime, get_runtime
+from agentself.harness.state import SavedState, SavedCapability
 
 
-def create_server(name: str = "agentself-repl") -> FastMCP:
+def create_server(
+    name: str = "agentself-repl",
+    runtime: HarnessRuntime | None = None,
+) -> FastMCP:
     """Create and configure the FastMCP server.
 
     Args:
@@ -28,24 +36,10 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
     """
     mcp = FastMCP(name)
 
-    # MCP Hub for backend server connections
-    hub = MCPHub()
-
-    # State manager for persistence
-    state_manager = StateManager()
-
-    # Relay handler that forwards calls to the hub
-    def relay_handler(capability: str, method: str, kwargs: dict) -> Any:
-        """Handle relay calls from the REPL by forwarding to MCP hub."""
-        # Run the async call synchronously
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(hub.call(capability, method, kwargs))
-        finally:
-            loop.close()
-
-    # Create the REPL subprocess with relay handler
-    repl = REPLSubprocess(relay_handler=relay_handler)
+    runtime = runtime or get_runtime()
+    repl = runtime.repl
+    hub = runtime.hub
+    state_manager = runtime.state_manager
 
     @mcp.tool()
     def execute(code: str) -> dict[str, Any]:
@@ -79,8 +73,12 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
             # Use an installed capability
             execute("files = fs.list('*.py')")
         """
-        result = repl.execute(code)
-        return asdict(result)
+        runtime.acquire()
+        try:
+            result = repl.execute(code)
+            return asdict(result)
+        finally:
+            runtime.release()
 
     @mcp.tool()
     def state() -> dict[str, Any]:
@@ -93,8 +91,12 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
             - capabilities: List of registered capability names
             - history_length: Number of code blocks executed
         """
-        result = repl.state()
-        return asdict(result)
+        runtime.acquire()
+        try:
+            result = repl.state()
+            return asdict(result)
+        finally:
+            runtime.release()
 
     @mcp.tool()
     def register_capability(name: str) -> dict[str, Any]:
@@ -112,11 +114,15 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
         Returns:
             Dict with success status and capability name or error.
         """
-        result = repl.register_capability(name)
-        if result:
-            return {"success": True, "capability_name": result}
-        else:
-            return {"success": False, "error": f"Failed to register '{name}'"}
+        runtime.acquire()
+        try:
+            result = repl.register_capability(name)
+            if result:
+                return {"success": True, "capability_name": result}
+            else:
+                return {"success": False, "error": f"Failed to register '{name}'"}
+        finally:
+            runtime.release()
 
     @mcp.tool()
     async def install_capability(name: str, command: str) -> dict[str, Any]:
@@ -144,6 +150,7 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
             # Then use it in the REPL
             execute("files = fs.list_directory('.')")
         """
+        runtime.acquire()
         try:
             # Connect to MCP server and get tools
             tools = await hub.install(name, command)
@@ -170,6 +177,8 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
 
         except Exception as e:
             return {"success": False, "error": str(e)}
+        finally:
+            runtime.release()
 
     @mcp.tool()
     async def uninstall_capability(name: str) -> dict[str, Any]:
@@ -184,8 +193,12 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
         Returns:
             Dict with success status.
         """
-        success = await hub.uninstall(name)
-        return {"success": success}
+        runtime.acquire()
+        try:
+            success = await hub.uninstall(name)
+            return {"success": success}
+        finally:
+            runtime.release()
 
     @mcp.tool()
     def list_capabilities() -> list[dict[str, Any]]:
@@ -197,7 +210,11 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
             - type: "native" or "relay"
             - description: Capability description
         """
-        return repl.list_capabilities()
+        runtime.acquire()
+        try:
+            return repl.list_capabilities()
+        finally:
+            runtime.release()
 
     @mcp.tool()
     def describe_capability(name: str) -> dict[str, Any]:
@@ -212,11 +229,15 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
             - description: Full capability documentation
             - error: Error message if not found
         """
-        result = repl.execute(f"{name}.describe()")
-        if result.success:
-            return {"success": True, "description": result.return_value}
-        else:
-            return {"success": False, "error": f"Capability '{name}' not found or has no describe()"}
+        runtime.acquire()
+        try:
+            result = repl.execute(f"{name}.describe()")
+            if result.success:
+                return {"success": True, "description": result.return_value}
+            else:
+                return {"success": False, "error": f"Capability '{name}' not found or has no describe()"}
+        finally:
+            runtime.release()
 
     @mcp.tool()
     def save_state(name: str = "default") -> dict[str, Any]:
@@ -236,6 +257,7 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
             - summary: What was saved (counts)
             - error: Error message if failed
         """
+        runtime.acquire()
         try:
             # Export state from REPL
             exported = repl.export_state()
@@ -294,6 +316,8 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+        finally:
+            runtime.release()
 
     @mcp.tool()
     async def restore_state(name: str = "default") -> dict[str, Any]:
@@ -311,6 +335,7 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
             - summary: What was restored (counts and any failures)
             - error: Error message if failed
         """
+        runtime.acquire()
         try:
             # Load state from disk
             state = state_manager.load(name)
@@ -380,6 +405,8 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
             }
         except Exception as e:
             return {"success": False, "error": str(e)}
+        finally:
+            runtime.release()
 
     @mcp.tool()
     def list_saved_states() -> dict[str, Any]:
@@ -388,7 +415,11 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
         Returns:
             Dict with list of state names.
         """
-        return {"states": state_manager.list_states()}
+        runtime.acquire()
+        try:
+            return {"states": state_manager.list_states()}
+        finally:
+            runtime.release()
 
     @mcp.tool()
     async def reset() -> dict[str, Any]:
@@ -400,16 +431,18 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
         Returns:
             Dict with success status.
         """
-        nonlocal repl
+        runtime.acquire()
+        try:
+            # Close hub connections
+            await hub.close()
 
-        # Close hub connections
-        await hub.close()
+            # Close and restart REPL
+            repl.close()
+            runtime.repl = REPLSubprocess(relay_handler=runtime.relay_handler)
 
-        # Close and restart REPL
-        repl.close()
-        repl = REPLSubprocess(relay_handler=relay_handler)
-
-        return {"success": True, "message": "REPL reset to clean state"}
+            return {"success": True, "message": "REPL reset to clean state"}
+        finally:
+            runtime.release()
 
     return mcp
 
@@ -418,17 +451,59 @@ def create_server(name: str = "agentself-repl") -> FastMCP:
 _server: FastMCP | None = None
 
 
-def get_server() -> FastMCP:
+def get_server(runtime: HarnessRuntime | None = None) -> FastMCP:
     """Get or create the global server instance."""
     global _server
     if _server is None:
-        _server = create_server()
+        _server = create_server(runtime=runtime)
     return _server
 
 
 def main():
     """Entry point for running the harness as an MCP server."""
-    server = get_server()
+    parser = argparse.ArgumentParser(description="agentself REPL harness")
+    parser.add_argument(
+        "--profile",
+        choices=["default", "safe"],
+        default="default",
+        help="Bootstrap profile to apply before starting the server",
+    )
+    parser.add_argument("--safe-root", default=None, help="Root directory for the safe profile")
+    parser.add_argument(
+        "--seed",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Seed the safe sandbox with example files",
+    )
+    parser.add_argument(
+        "--allow-cmd",
+        dest="allowed_commands",
+        action="append",
+        help="Allowlisted shell command (repeatable)",
+    )
+    parser.add_argument("--attach-socket", default=None, help="Unix socket path for attach server")
+
+    args = parser.parse_args()
+
+    runtime = get_runtime()
+
+    if args.profile == "safe":
+        safe_root = Path(args.safe_root or "~/.agentself/sandboxes/safe").expanduser()
+        bootstrap_safe(
+            runtime,
+            safe_root,
+            allowed_commands=args.allowed_commands,
+            seed=args.seed,
+        )
+
+    if args.attach_socket:
+        socket_path = Path(args.attach_socket).expanduser()
+        attach_server = AttachServer(socket_path, runtime)
+        thread = threading.Thread(target=attach_server.serve_forever, daemon=True)
+        thread.start()
+        print(f"[agentself] attach server on {socket_path}", file=sys.stderr)
+
+    server = get_server(runtime)
     server.run()
 
 

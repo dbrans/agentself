@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 agentself = "agentself.harness:main"
+agentself-attach = "agentself.harness.attach:main"
 
 [project.optional-dependencies]
 dev = [
@@ -38,3 +39,4 @@ managed = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+norecursedirs = ["tests/_archive"]

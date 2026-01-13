@@ -47,6 +47,7 @@ class CommandLineCapability(Capability):
         allowed_commands: list[str] | None = None,
         allowed_cwd: list[Path | str] | None = None,
         timeout: int = 30,
+        deny_shell_operators: bool = False,
     ):
         """Initialize command line capability.
 
@@ -56,10 +57,12 @@ class CommandLineCapability(Capability):
             allowed_cwd: List of allowed working directories.
                         If None, all directories are allowed.
             timeout: Maximum seconds a command can run.
+            deny_shell_operators: If True, block shell chaining/operators like &&, |, ;.
         """
         self.allowed_commands = allowed_commands
         self.allowed_cwd = [Path(p).resolve() for p in (allowed_cwd or [])]
         self.timeout = timeout
+        self.deny_shell_operators = deny_shell_operators
 
     def contract(self) -> "CapabilityContract":
         """Declare what this capability might do."""
@@ -86,6 +89,10 @@ class CommandLineCapability(Capability):
         new_commands = restrictions.get("allowed_commands", self.allowed_commands)
         new_cwd = restrictions.get("allowed_cwd", self.allowed_cwd)
         new_timeout = restrictions.get("timeout", self.timeout)
+        new_deny_shell_operators = restrictions.get(
+            "deny_shell_operators",
+            self.deny_shell_operators,
+        )
 
         # Ensure new commands are subset of current commands
         if self.allowed_commands and new_commands:
@@ -95,10 +102,14 @@ class CommandLineCapability(Capability):
         if self.timeout:
             new_timeout = min(new_timeout, self.timeout)
 
+        if self.deny_shell_operators:
+            new_deny_shell_operators = True
+
         return CommandLineCapability(
             allowed_commands=new_commands,
             allowed_cwd=new_cwd or self.allowed_cwd,
             timeout=new_timeout,
+            deny_shell_operators=new_deny_shell_operators,
         )
     
     def _is_command_allowed(self, command: str) -> bool:
@@ -152,6 +163,11 @@ class CommandLineCapability(Capability):
             raise PermissionError(
                 f"Command not allowed. Allowed commands: {allowed_str}"
             )
+
+        if self.deny_shell_operators:
+            blocked = ["&&", "||", ";", "|", "`", "$(", ">", "<", "\n"]
+            if any(token in command for token in blocked):
+                raise PermissionError("Shell operators are not allowed")
         
         cwd_path = Path(cwd) if cwd else None
         if not self._is_cwd_allowed(cwd_path):

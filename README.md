@@ -19,6 +19,21 @@ uv run pytest
 uv run ruff check .
 ```
 
+## Manual testing
+
+```bash
+# Start a safe harness + attach socket (agent integration manual testing)
+./scripts/run-safe-harness.sh
+
+# Attach and poke around (user attach use-case)
+./scripts/attach-repl.sh
+```
+
+Notes:
+- The safe profile installs read-only `fs` and an allowlisted `cmd` capability (default: `ls`, `cat`, `pwd`).
+- Override the allowlist by passing `--allow-cmd` flags to `run-safe-harness.sh`.
+- The attach client refuses when the REPL is busy (use `--wait` to block).
+
 ## Philosophy
 
 - Stay simple and nimble

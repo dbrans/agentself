@@ -209,3 +209,19 @@ class TestCommandLineCapability:
 
         assert any("git" in e for e in contract.executes)
         assert any("npm" in e for e in contract.executes)
+
+    def test_deny_shell_operators_allows_simple_command(self):
+        """Test deny_shell_operators allows simple commands."""
+        cap = CommandLineCapability(allowed_commands=["echo"], deny_shell_operators=True)
+        result = cap.run("echo safe")
+
+        assert result.exit_code == 0
+
+    def test_deny_shell_operators_blocks_chaining(self):
+        """Test deny_shell_operators blocks shell chaining."""
+        cap = CommandLineCapability(allowed_commands=["echo"], deny_shell_operators=True)
+
+        with pytest.raises(PermissionError) as exc:
+            cap.run("echo safe && whoami")
+
+        assert "Shell operators" in str(exc.value)
