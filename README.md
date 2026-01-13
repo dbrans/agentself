@@ -73,3 +73,7 @@ Environment variables in `mcp.json` are expanded (e.g., `${CONTEXT7_API_KEY}`).
 - Stay simple and nimble
 - Prioritize homoiconicity of code, data, prompts, workflows, and knowledge
 - The agent can read and write itself
+
+## Docs
+
+See `docs/INDEX.md` for the documentation entry point.
