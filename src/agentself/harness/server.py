@@ -7,6 +7,7 @@ Integrates with backend MCP servers via the hub.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import sys
 import threading
@@ -19,6 +20,7 @@ from fastmcp import FastMCP
 from agentself.harness.attach_server import AttachServer
 from agentself.harness.bootstrap import bootstrap_safe
 from agentself.harness.logging_utils import abbreviate, configure_logging
+from agentself.harness.mcp_config import install_from_config
 from agentself.harness.repl import REPLSubprocess
 from agentself.harness.runtime import HarnessRuntime, get_runtime
 from agentself.harness.state import SavedState, SavedCapability
@@ -137,7 +139,13 @@ def create_server(
             runtime.release()
 
     @mcp.tool()
-    async def install_capability(name: str, command: str) -> dict[str, Any]:
+    async def install_capability(
+        name: str,
+        command: str,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> dict[str, Any]:
         """Install an MCP server as a capability in the REPL.
 
         This connects to an external MCP server and makes its tools
@@ -146,6 +154,9 @@ def create_server(
         Args:
             name: Name for the capability (e.g., "fs", "gmail").
             command: Command to start the MCP server.
+            args: Optional argument list (skips command parsing).
+            env: Optional environment variables for the server.
+            cwd: Optional working directory for the server.
                     Example: "npx @anthropic/filesystem-mcp /path/to/root"
 
         Returns:
@@ -166,7 +177,7 @@ def create_server(
         runtime.acquire()
         try:
             # Connect to MCP server and get tools
-            tools = await hub.install(name, command)
+            tools = await hub.install(name, command, args=args, env=env, cwd=cwd)
 
             # Prepare tool specs for the REPL
             tool_specs = {
@@ -178,7 +189,11 @@ def create_server(
             success = repl.inject_relay_capability(name, tool_specs)
 
             if success:
-                logger.info("installed capability name=%s tools=%s", name, [t.name for t in tools])
+                logger.info(
+                    "installed capability name=%s tools=%s",
+                    name,
+                    [t.name for t in tools],
+                )
                 return {
                     "success": True,
                     "capability_name": name,
@@ -509,6 +524,16 @@ def main():
     )
     parser.add_argument("--attach-socket", default=None, help="Unix socket path for attach server")
     parser.add_argument(
+        "--mcp-config",
+        default="mcp.json",
+        help="Path to MCP config (Claude Code mcp.json format).",
+    )
+    parser.add_argument(
+        "--no-mcp-config",
+        action="store_true",
+        help="Disable MCP config auto-install on startup.",
+    )
+    parser.add_argument(
         "--log-level",
         default=None,
         help="Log level (overrides AGENTSELF_LOG_LEVEL).",
@@ -539,6 +564,12 @@ def main():
             allowed_commands=args.allowed_commands,
             seed=args.seed,
         )
+
+    if not args.no_mcp_config and args.mcp_config:
+        config_path = Path(args.mcp_config).expanduser()
+        if config_path.exists():
+            logger.info("loading mcp config path=%s", config_path)
+            asyncio.run(install_from_config(runtime, config_path))
 
     if args.attach_socket:
         socket_path = Path(args.attach_socket).expanduser()

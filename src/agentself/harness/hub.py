@@ -53,12 +53,22 @@ class MCPHub:
         self.backends: dict[str, BackendServer] = {}
         self._lock = asyncio.Lock()
 
-    async def install(self, name: str, command: str) -> list[ToolSpec]:
+    async def install(
+        self,
+        name: str,
+        command: str,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        cwd: str | None = None,
+    ) -> list[ToolSpec]:
         """Connect to an MCP server and return its tools.
 
         Args:
             name: Name to use for this backend (e.g., "gmail", "fs").
             command: Command to start the MCP server.
+            args: Optional command arguments (skips shlex parsing).
+            env: Optional environment variables for the server.
+            cwd: Optional working directory for the server.
 
         Returns:
             List of tools provided by the server.
@@ -71,17 +81,31 @@ class MCPHub:
                 await self.uninstall(name)
 
             # Parse command
-            parts = shlex.split(command)
-            if not parts:
-                raise ValueError(f"Invalid command: {command}")
+            command_line = command
+            if args is None:
+                parts = shlex.split(command)
+                if not parts:
+                    raise ValueError(f"Invalid command: {command}")
+                command = parts[0]
+                args = parts[1:] if len(parts) > 1 else []
+            else:
+                command_line = " ".join([command] + args)
 
             server_params = StdioServerParameters(
-                command=parts[0],
-                args=parts[1:] if len(parts) > 1 else [],
+                command=command,
+                args=args,
+                env=env,
+                cwd=cwd,
             )
 
             try:
-                logger.info("mcp install name=%s command=%s", name, command)
+                logger.info(
+                    "mcp install name=%s command=%s args=%s cwd=%s",
+                    name,
+                    command,
+                    args,
+                    cwd,
+                )
                 # Connect to the server
                 read, write = await asyncio.wait_for(
                     stdio_client(server_params).__aenter__(),
@@ -99,7 +123,7 @@ class MCPHub:
 
                 self.backends[name] = BackendServer(
                     name=name,
-                    command=command,
+                    command=command_line,
                     tools=tools,
                     session=session,
                 )

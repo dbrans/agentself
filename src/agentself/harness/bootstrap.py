@@ -42,6 +42,7 @@ def bootstrap_safe(
     code = textwrap.dedent(
         f"""
         from agentself.capabilities import FileSystemCapability, CommandLineCapability
+        from agentself.skills import SkillRegistry
 
         fs = FileSystemCapability(allowed_paths=[{root_literal}], read_only=True)
         cmd = CommandLineCapability(
@@ -50,6 +51,7 @@ def bootstrap_safe(
             allowed_paths=[{root_literal}],
             deny_shell_operators=True,
         )
+        skills = SkillRegistry()
         """
     ).strip()
 

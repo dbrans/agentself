@@ -23,10 +23,13 @@ Use `uv` for all dependency and runtime tasks:
 - Framework: `pytest` (configured via `[tool.pytest.ini_options]`).
 - Place new tests under `tests/` and follow `test_<module>.py` naming.
 - For new features, add at least one happy-path test and one edge case.
+- Always run tests for new changes before finishing.
+- Be proactive: exercise important paths beyond the obvious happy-path when testing.
 
 ## Commit & Pull Request Guidelines
 - Commit messages in history are short, sentence-case summaries (e.g., “State Persistence”).
 - Keep commits focused; avoid “wip” except for draft branches.
+- After completing a batch of changes, commit with a concise summary in the current branch.
 - PRs should include: a concise description, how you tested (command + result), and any relevant screenshots/log snippets for CLI output changes.
 
 ## Agent-Specific Instructions

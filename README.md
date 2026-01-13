@@ -27,6 +27,15 @@ uv run ruff check .
 
 # Attach and poke around (user attach use-case)
 ./scripts/attach-repl.sh
+
+# Start in background with logs + pid file
+./scripts/harness-start.sh
+
+# Tail harness logs
+./scripts/harness-logs.sh
+
+# Stop the background harness
+./scripts/harness-stop.sh
 ```
 
 Notes:
@@ -36,6 +45,24 @@ Notes:
 - Enable logging with `AGENTSELF_LOG_LEVEL=DEBUG` (or pass `--log-level debug`).
 - Debug logs include REPL execs and capability calls (fs/cmd + MCP relay).
 - Attach supports line editing + history; Shift-Enter for new lines when `prompt_toolkit` is installed.
+
+## Skills
+
+Skills live under `skills/` with a `SKILL.md` per skill (YAML frontmatter for metadata).
+
+```bash
+uv run agentself-skills list
+uv run agentself-skills show safe-harness
+```
+
+Tip: use `rg`/`grep` on `skills/` for quick searching.
+In the REPL (safe profile), use `skills.list()` or `skills.show("<name>")`.
+
+## MCP config
+
+The harness can auto-install MCP servers from `mcp.json` (Claude Code format).
+Disable auto-install with `--no-mcp-config`.
+Environment variables in `mcp.json` are expanded (e.g., `${CONTEXT7_API_KEY}`).
 - Optional: `--log-file ./_tmp/agentself.log` to write logs to a file.
 
 ## Philosophy
