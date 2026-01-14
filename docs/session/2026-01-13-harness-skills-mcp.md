@@ -16,12 +16,12 @@
 
 ## Usage Highlights
 - Safe harness (foreground):
-  - `./scripts/run-harness.sh ./_tmp/agentself.attach.sock ./_tmp/safe_root`
+  - `./scripts/run-harness.sh`
 - Attach:
-  - `./scripts/attach-repl.sh ./_tmp/agentself.attach.sock`
+  - `./scripts/attach-repl.sh`
 - Logging workflow:
   - `LOG_FILE="./_tmp/harness-$(date +%Y%m%d-%H%M%S).log"`
-  - `./scripts/run-harness.sh ./_tmp/agentself.attach.sock ./_tmp/safe_root 2>&1 | tee "$LOG_FILE"`
+  - `./scripts/run-harness.sh 2>&1 | tee "$LOG_FILE"`
 
 ## Tests
 - `uv run pytest` (most recent run: 83 tests passed)

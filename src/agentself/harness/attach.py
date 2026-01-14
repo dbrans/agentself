@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import codeop
 import json
 import os
 import socket
@@ -11,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any, TextIO
 
+from agentself.harness.paths import attach_history_default, attach_socket_default
 try:
     import readline
 except ImportError:  # pragma: no cover - platform dependent
@@ -27,13 +29,17 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 def _default_socket() -> Path:
-    return Path(os.environ.get("AGENTSELF_ATTACH_SOCKET", "~/.agentself/repl.sock")).expanduser()
+    env_socket = os.environ.get("AGENTSELF_ATTACH_SOCKET")
+    if env_socket:
+        return Path(env_socket).expanduser()
+    return attach_socket_default()
 
 
 def _history_path() -> Path:
-    return Path(
-        os.environ.get("AGENTSELF_ATTACH_HISTORY", "~/.agentself/attach_history")
-    ).expanduser()
+    env_history = os.environ.get("AGENTSELF_ATTACH_HISTORY")
+    if env_history:
+        return Path(env_history).expanduser()
+    return attach_history_default()
 
 
 def _send_request(sock_file: TextIO, request: dict[str, Any]) -> dict[str, Any]:
@@ -148,7 +154,23 @@ def _interactive_prompt_toolkit(sock_file: TextIO, wait: bool) -> None:
     history_path.parent.mkdir(parents=True, exist_ok=True)
     key_bindings = KeyBindings()
 
-    @key_bindings.add("s-enter")
+    def _input_complete(text: str) -> bool:
+        try:
+            return codeop.compile_command(text, symbol="exec") is not None
+        except (SyntaxError, ValueError, OverflowError):
+            return True
+
+    @key_bindings.add("enter")
+    def _(event) -> None:
+        buffer = event.current_buffer
+        if buffer.cursor_position != len(buffer.text):
+            buffer.insert_text("\n")
+        elif _input_complete(buffer.text):
+            buffer.validate_and_handle()
+        else:
+            buffer.insert_text("\n")
+
+    @key_bindings.add("escape", "enter")
     def _(event) -> None:
         event.current_buffer.insert_text("\n")
 
@@ -162,13 +184,13 @@ def _interactive_prompt_toolkit(sock_file: TextIO, wait: bool) -> None:
 
     session = PromptSession(
         "repl> ",
-        multiline=False,
+        multiline=True,
         key_bindings=key_bindings,
         history=FileHistory(str(history_path)),
     )
 
     print("Attached. Commands: :state, :caps, :desc <name>, :block, :quit")
-    print("Tip: Shift-Enter inserts a newline.")
+    print("Tip: Enter submits when complete; Esc+Enter inserts a newline.")
     while True:
         try:
             line = session.prompt()

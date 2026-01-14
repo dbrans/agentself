@@ -33,9 +33,12 @@ Notes:
 - The safe profile installs read-only `fs` and an allowlisted `cmd` capability (default: `ls`, `cat`, `pwd`).
 - Override the allowlist by passing `--allow-cmd` flags to `run-harness.sh`.
 - The attach client refuses when the REPL is busy (use `--wait` to block).
+- Attach to an active REPL using the same socket as the harness (pass a socket path if running multiple).
+- Helper scripts default to `_tmp/agentself/`; the library defaults to `.agentself/` (override with `AGENTSELF_HOME`).
 - Enable logging with `AGENTSELF_LOG_LEVEL=DEBUG` (or pass `--log-level debug`).
 - Debug logs include REPL execs and capability calls (fs/cmd + MCP relay).
-- Attach supports line editing + history; Shift-Enter for new lines when `prompt_toolkit` is installed.
+- Attach supports line editing + history when `prompt_toolkit` is installed; use `--plain` to force readline.
+- Enter submits when input is complete; Esc+Enter inserts a newline.
 
 ## Skills
 

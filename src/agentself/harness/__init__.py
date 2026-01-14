@@ -7,7 +7,7 @@ Usage:
     python -m agentself.harness
 
     # Start with attach socket
-    python -m agentself.harness --attach-socket ~/.agentself/repl.sock
+    python -m agentself.harness --attach-socket .agentself/repl.sock
 
     # Or import and use directly
     from agentself.harness import REPLSubprocess
