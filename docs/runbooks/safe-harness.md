@@ -2,13 +2,7 @@
 
 ## Start (foreground)
 ```
-./scripts/run-safe-harness.sh ./_tmp/agentself.attach.sock ./_tmp/safe_root --log-file ./_tmp/agentself.log
-```
-
-## Start (background)
-```
-./scripts/harness-start.sh
-./scripts/harness-logs.sh
+./scripts/run-harness.sh ./_tmp/agentself.attach.sock ./_tmp/safe_root
 ```
 
 ## Attach
@@ -16,12 +10,17 @@
 ./scripts/attach-repl.sh ./_tmp/agentself.attach.sock
 ```
 
-## Stop
+## Logging
 ```
-./scripts/harness-stop.sh
+LOG_FILE="./_tmp/harness-$(date +%Y%m%d-%H%M%S).log"
+./scripts/run-harness.sh ./_tmp/agentself.attach.sock ./_tmp/safe_root 2>&1 | tee "$LOG_FILE"
 ```
 
+## Stop
+- Ctrl-C in the terminal running the harness.
+- Or `kill <pid>` if running in the background.
+
 ## Troubleshooting
-- `ConnectionRefusedError`: harness not running; check `_tmp/harness.out`.
+- `ConnectionRefusedError`: harness not running; check the log file.
+- Socket exists but no listener: restart the harness.
 - Permission error writing safe root: use `_tmp/safe_root` or `--no-seed`.
-- Socket exists but no listener: stale socket; restart harness.

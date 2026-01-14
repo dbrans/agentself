@@ -3,7 +3,7 @@
 ## Summary
 - Added safe harness profile, attach server, and attach client for REPL access.
 - Implemented read-only safe capabilities (`fs`, `cmd`) with path-argument guardrails.
-- Added structured logging and harness start/stop/log scripts.
+- Added structured logging and a single harness runner.
 - Implemented skills registry and read-only `skills` capability with multi-root support.
 - Added MCP config auto-install (`mcp.json`) and config loader.
 
@@ -12,22 +12,21 @@
 - Skills discovery supports multiple roots via `AGENTSELF_SKILLS_DIRS` (first root wins).
 - Command line capability validates path-like arguments against allowed paths.
 - Logging is opt-in and scoped to `agentself` to avoid third-party debug noise.
+- Single harness runner script (`run-harness.sh`); logs are handled via standard shell redirection.
 
 ## Usage Highlights
 - Safe harness (foreground):
-  - `./scripts/run-safe-harness.sh ./_tmp/agentself.attach.sock ./_tmp/safe_root --log-file ./_tmp/agentself.log`
+  - `./scripts/run-harness.sh ./_tmp/agentself.attach.sock ./_tmp/safe_root`
 - Attach:
   - `./scripts/attach-repl.sh ./_tmp/agentself.attach.sock`
-- Background harness:
-  - `./scripts/harness-start.sh`
-  - `./scripts/harness-logs.sh`
-  - `./scripts/harness-stop.sh`
+- Logging workflow:
+  - `LOG_FILE="./_tmp/harness-$(date +%Y%m%d-%H%M%S).log"`
+  - `./scripts/run-harness.sh ./_tmp/agentself.attach.sock ./_tmp/safe_root 2>&1 | tee "$LOG_FILE"`
 
 ## Tests
-- `uv run pytest` (multiple runs; most recent: 83 tests passed)
+- `uv run pytest` (most recent run: 83 tests passed)
 
 ## Open Issues (see docs/OPEN_ISSUES.md)
 - MCP install allowlist.
-- Log rotation/truncation policy.
+- Log rotation/truncation policy (if needed beyond shell redirection).
 - Cleanup behavior for attach sockets.
-- Default safe root for background harness in sandboxed runs.
