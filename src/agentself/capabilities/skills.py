@@ -36,21 +36,36 @@ class SkillsCapability(Capability):
 
     def list(self) -> list[dict[str, str]]:
         """List available skills (metadata only)."""
-        return [
-            {"name": meta.name, "description": meta.description, "path": str(meta.path.parent)}
-            for meta in self.registry.list()
-        ]
+        payload: list[dict[str, str]] = []
+        for meta in self.registry.list():
+            skill_file = meta.path
+            base_path = skill_file.parent if skill_file.name == "SKILL.md" else skill_file
+            kind = "dir" if base_path.is_dir() else "file"
+            payload.append(
+                {
+                    "name": meta.name,
+                    "description": meta.description,
+                    "path": str(base_path),
+                    "skill_file": str(skill_file),
+                    "kind": kind,
+                }
+            )
+        return payload
 
     def path(self, name: str) -> str:
-        """Return the skill directory path."""
-        return str(self.registry.path(name).parent)
+        """Return the skill base path (directory or single file)."""
+        skill_file = self.registry.path(name)
+        base_path = skill_file.parent if skill_file.name == "SKILL.md" else skill_file
+        return str(base_path)
 
     def files(self, name: str) -> list[str]:
         """List files inside a skill directory."""
-        path = Path(self.registry.path(name).parent)
-        if not path.exists():
+        base = Path(self.path(name))
+        if not base.exists():
             return []
-        return sorted(str(p) for p in path.rglob("*") if p.is_file())
+        if base.is_file():
+            return [str(base)]
+        return sorted(str(p) for p in base.rglob("*") if p.is_file())
 
     def show(self, name: str) -> str:
         """Return the skill's SKILL.md content."""

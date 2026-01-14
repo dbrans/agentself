@@ -76,16 +76,27 @@ class SkillRegistry:
         for root in self.roots:
             if not root.exists():
                 continue
-            for skill_dir in sorted(root.iterdir()):
-                skill_file = skill_dir / "SKILL.md"
-                if not skill_file.is_file():
+            for entry in sorted(root.iterdir()):
+                if entry.is_dir():
+                    skill_file = entry / "SKILL.md"
+                    if not skill_file.is_file():
+                        continue
+                    meta = _read_frontmatter(skill_file)
+                    name = meta.get("name") or entry.name
+                    if name in skills:
+                        continue
+                    description = meta.get("description") or ""
+                    skills[name] = SkillMeta(name=name, description=description, path=skill_file)
                     continue
-                meta = _read_frontmatter(skill_file)
-                name = meta.get("name") or skill_dir.name
-                if name in skills:
-                    continue
-                description = meta.get("description") or ""
-                skills[name] = SkillMeta(name=name, description=description, path=skill_file)
+                if entry.is_file() and entry.suffix.lower() == ".md":
+                    meta = _read_frontmatter(entry)
+                    if not meta:
+                        continue
+                    name = meta.get("name") or entry.stem
+                    if name in skills:
+                        continue
+                    description = meta.get("description") or ""
+                    skills[name] = SkillMeta(name=name, description=description, path=entry)
         return list(skills.values())
 
     def show(self, name: str) -> str:

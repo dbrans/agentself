@@ -16,9 +16,18 @@ def _write_skill(root: Path, name: str, description: str) -> None:
     )
 
 
+def _write_single_skill(root: Path, name: str, description: str) -> None:
+    skill_file = root / f"{name}.md"
+    skill_file.write_text(
+        f"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\n",
+        encoding="utf-8",
+    )
+
+
 def test_list_and_show_skills(tmp_path: Path) -> None:
     _write_skill(tmp_path, "one", "First skill")
     _write_skill(tmp_path, "two", "Second skill")
+    _write_single_skill(tmp_path, "single", "Single-file skill")
 
     registry = SkillRegistry(root=tmp_path)
     skills = registry.list()
@@ -26,9 +35,13 @@ def test_list_and_show_skills(tmp_path: Path) -> None:
 
     assert "one" in names
     assert "two" in names
+    assert "single" in names
 
     content = registry.show("one")
     assert "First skill" in content
+
+    single_content = registry.show("single")
+    assert "Single-file skill" in single_content
 
 
 def test_missing_skill_raises(tmp_path: Path) -> None:

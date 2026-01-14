@@ -23,7 +23,7 @@ Prompt behavior: Enter submits when input is complete; Esc+Enter inserts a newli
 
 ## Logging
 ```
-LOG_FILE="./_tmp/harness-$(date +%Y%m%d-%H%M%S).log"
+LOG_FILE="./_tmp/logs/$(date +%Y%m%d-%H%M%S)-harness.log"
 ./scripts/run-harness.sh 2>&1 | tee "$LOG_FILE"
 ```
 

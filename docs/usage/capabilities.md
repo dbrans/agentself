@@ -13,10 +13,10 @@
 
 ## SkillsCapability (skills)
 - Read-only lens over skills roots.
-- `skills.list()` → metadata
-- `skills.path(name)` → directory path
+- `skills.list()` → metadata (includes `kind` and `skill_file`)
+- `skills.path(name)` → directory path or single-file path
 - `skills.files(name)` → file list
-- `skills.show(name)` → SKILL.md contents
+- `skills.show(name)` → skill contents
 - `skills.fs` / `skills.cmd` → read-only access to skills roots
 
 ## Safe Profile Defaults

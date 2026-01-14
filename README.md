@@ -42,14 +42,14 @@ Notes:
 
 ## Skills
 
-Skills live under `skills/` with a `SKILL.md` per skill (YAML frontmatter for metadata).
+Skills live under `skills/` with a `SKILL.md` per skill (or a single-file `<name>.md`).
 Set `AGENTSELF_SKILLS_DIRS` (path-separated) to add more roots.
 
 In the REPL (safe profile), use:
 - `skills.list()` for metadata
-- `skills.path("<name>")` for the skill directory
+- `skills.path("<name>")` for the skill directory or file
 - `skills.files("<name>")` to list files
-- `skills.show("<name>")` to show `SKILL.md`
+- `skills.show("<name>")` to show the skill file
 - `skills.fs` / `skills.cmd` for read-only access to `skills/`
 
 Tip: use `rg`/`grep` on `skills/` for quick searching.
