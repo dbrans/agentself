@@ -1,10 +1,11 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
-- `src/agentself/` contains the core library (src layout). Main modules live at `src/agentself/core.py` and `src/agentself/harness/`.
-- `tests/` mirrors the package with `test_*.py` files (e.g., `tests/test_core.py`).
-- `docs/` holds documentation notes.
-- `_archive/` folders contain legacy or experimental code; avoid modifying unless explicitly needed.
+## Project Overview
+This is a capability-based REPL harness for coding agents, currently in bootstrap phase. External agents (Claude Code, Gemini CLI) are building the infrastructure toward self-hosted operation.
+
+## Project Structure
+- Source uses `src/` layout; tests mirror the package under `tests/`.
+- `_archive/` folders contain legacy code; avoid modifying unless explicitly needed.
 
 ## Build, Test, and Development Commands
 Use `uv` for all dependency and runtime tasks:

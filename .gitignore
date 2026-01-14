@@ -49,5 +49,6 @@ Thumbs.db
 
 # agentself local state (sessions, caches)
 .agentself/
+.claude/
 .ruff_cache/
 _tmp/
