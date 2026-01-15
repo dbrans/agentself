@@ -24,9 +24,7 @@ This repository supports multiple AI coding agents: **Codex**, **Gemini CLI**, *
 │   ├── hooks/             # Lifecycle hooks
 │   ├── skills/            # Symlink → ../.agent/skills
 │   └── settings.json      # Gemini-specific settings
-└── scripts/
-    └── sync-agent-commands.sh  # Syncs MD commands → TOML for Gemini
-    └── sync-agent-skills.sh    # Syncs skills/ → .agent/skills and agent symlinks
+└── pyproject.toml         # CLI entrypoints (run-harness, attach-repl, sync-agent-skills)
 ```
 
 ---
@@ -80,7 +78,7 @@ skills in `.agent/skills/`, including converting single-file skills into `SKILL.
 folders as needed.
 
 ```bash
-./scripts/sync-agent-skills.sh
+uv run sync-agent-skills
 ```
 
 The script also creates symlinks for agent-specific skills folders (e.g., `.claude/skills`,
@@ -163,7 +161,7 @@ This converts `.agent/commands/*.md` → `.gemini/commands/*.toml`
 Skills are synced from the repo's `skills/` folder into `.agent/skills/`:
 
 ```bash
-./scripts/sync-agent-skills.sh
+uv run sync-agent-skills
 ```
 
 Run this after adding or modifying skills (including single-file skills).
@@ -216,7 +214,7 @@ Codex CLI reads from:
 | Codex rules | `CODEX.md` | Markdown | Symlink to `AGENTS.md` |
 | Add command | `.agent/commands/` | Markdown | Run sync script for Gemini |
 | Add path-scoped rule | `.agent/rules/` | Markdown | Use `paths:` frontmatter |
-| Add skill | `skills/` | Markdown | Run `./scripts/sync-agent-skills.sh` |
+| Add skill | `skills/` | Markdown | Run `uv run sync-agent-skills` |
 | Claude permissions | `.claude/settings.json` | JSON | Claude-only |
 | Gemini context | `.gemini/settings.json` | JSON | Gemini-only |
 | Gemini hooks | `.gemini/hooks/` | Scripts | Gemini-only |

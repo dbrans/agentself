@@ -9,8 +9,8 @@ Accepted (2026-01-14)
 - The attach client previously relied on an unsupported Shift-Enter binding.
 
 ## Decision
-- Library defaults to `.agentself/` in the current working directory, overridable with `AGENTSELF_HOME`.
-- Helper scripts default to `_tmp/agentself/` for disposable runs (they export `AGENTSELF_HOME`).
+- Library defaults to `.agentself/` in the repo.
+- Helper commands default to `_tmp/agentself/` for disposable runs.
 - Attach uses prompt_toolkit when available with smart Enter behavior:
   - Enter submits when input is complete.
   - Enter inserts a newline when input is incomplete.
@@ -24,5 +24,5 @@ Accepted (2026-01-14)
 
 ## Consequences
 - Works in sandboxed environments and avoids cross-project state leakage by default.
-- Multi-harness runs still supported via explicit socket or `AGENTSELF_HOME`.
+- Multi-harness runs are deferred for now (fixed socket path).
 - Attach UX matches modern REPL expectations without relying on unsupported key bindings.

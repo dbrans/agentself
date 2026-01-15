@@ -1,8 +1,8 @@
 """Tests for skills registry."""
 
-import os
 from pathlib import Path
 
+from agentself.paths import SKILLS_ROOT
 from agentself.skills import SkillRegistry
 
 
@@ -52,20 +52,14 @@ def test_missing_skill_raises(tmp_path: Path) -> None:
         assert "missing" in str(exc)
 
 
-def test_skill_registry_root_from_env(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("AGENTSELF_SKILLS_DIR", str(tmp_path))
+def test_skill_registry_default_root() -> None:
     registry = SkillRegistry()
-    assert registry.root == tmp_path.resolve()
+    assert registry.root == SKILLS_ROOT.resolve()
 
 
-def test_skill_registry_roots_from_env(tmp_path: Path, tmp_path_factory, monkeypatch) -> None:
-    other_root = tmp_path_factory.mktemp("skills2")
-    monkeypatch.setenv(
-        "AGENTSELF_SKILLS_DIRS",
-        f"{tmp_path}{os.pathsep}{other_root}",
-    )
+def test_skill_registry_default_roots() -> None:
     registry = SkillRegistry()
-    assert registry.roots == [tmp_path.resolve(), other_root.resolve()]
+    assert registry.roots == [SKILLS_ROOT.resolve()]
 
 
 def test_skill_registry_root_precedence(tmp_path: Path, tmp_path_factory) -> None:

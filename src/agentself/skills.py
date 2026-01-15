@@ -3,27 +3,18 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from agentself.paths import SKILLS_ROOT
+
 
 def _default_skills_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "skills"
+    return SKILLS_ROOT
 
 
 def _default_skill_roots() -> list[Path]:
-    env_roots = os.environ.get("AGENTSELF_SKILLS_DIRS")
-    if env_roots:
-        roots = [p for p in env_roots.split(os.pathsep) if p.strip()]
-        if roots:
-            return [Path(p).expanduser().resolve() for p in roots]
-
-    env_root = os.environ.get("AGENTSELF_SKILLS_DIR")
-    if env_root:
-        return [Path(env_root).expanduser().resolve()]
-
     return [_default_skills_root().resolve()]
 
 

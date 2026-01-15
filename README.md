@@ -23,18 +23,18 @@ uv run ruff check .
 
 ```bash
 # Start a safe harness + attach socket (agent integration manual testing)
-./scripts/run-harness.sh
+uv run run-harness
 
 # Attach and poke around (user attach use-case)
-./scripts/attach-repl.sh
+uv run attach-repl
 ```
 
 Notes:
 - The safe profile installs read-only `fs` and an allowlisted `cmd` capability (default: `ls`, `cat`, `pwd`).
-- Override the allowlist by passing `--allow-cmd` flags to `run-harness.sh`.
+- Override the allowlist by passing `--allow-cmd` flags to `run-harness`.
 - The attach client refuses when the REPL is busy (use `--wait` to block).
-- Attach to an active REPL using the same socket as the harness (pass a socket path if running multiple).
-- Helper scripts default to `_tmp/agentself/`; the library defaults to `.agentself/` (override with `AGENTSELF_HOME`).
+- Attach to an active REPL using the same socket as the harness.
+- Helper commands default to `_tmp/agentself/`; the library defaults to `.agentself/`.
 - Enable logging with `AGENTSELF_LOG_LEVEL=DEBUG` (or pass `--log-level debug`).
 - Debug logs include REPL execs and capability calls (fs/cmd + MCP relay).
 - Attach supports line editing + history when `prompt_toolkit` is installed; use `--plain` to force readline.
@@ -43,7 +43,6 @@ Notes:
 ## Skills
 
 Skills live under `skills/` with a `SKILL.md` per skill (or a single-file `<name>.md`).
-Set `AGENTSELF_SKILLS_DIRS` (path-separated) to add more roots.
 
 In the REPL (safe profile), use:
 - `skills.list()` for metadata

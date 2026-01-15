@@ -13,8 +13,7 @@ skills/
 
 ## Roots
 - Default skills root: `./skills`.
-- Override/add roots with `AGENTSELF_SKILLS_DIRS` (path-separated).
-- First root wins on name collisions.
+- No overrides for now.
 
 ## REPL Access
 - `skills.list()`
@@ -28,4 +27,4 @@ Notes:
 - `skills.list()` includes `skill_file` and `kind` metadata.
 
 ## Unix ergonomics
-- Use `rg`/`grep` on `skills/` (or on each root).
+- Use `rg`/`grep` on `skills/`.

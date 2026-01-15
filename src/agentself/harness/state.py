@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from agentself.harness.paths import state_dir_default
+from agentself.paths import STATE_DIR
 
 # Optional dill import for complex object serialization
 try:
@@ -139,11 +139,10 @@ class StateManager:
         """Initialize state manager.
 
         Args:
-            state_dir: Directory for state files. Defaults to .agentself/state in the CWD
-                (or AGENTSELF_HOME/state if set).
+            state_dir: Directory for state files. Defaults to .agentself/state in the repo.
         """
         if state_dir is None:
-            state_dir = state_dir_default()
+            state_dir = STATE_DIR
         self.state_dir = Path(state_dir)
         self.state_dir.mkdir(parents=True, exist_ok=True)
 

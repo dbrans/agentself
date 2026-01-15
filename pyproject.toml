@@ -14,6 +14,9 @@ dependencies = [
 [project.scripts]
 agentself = "agentself.harness:main"
 agentself-attach = "agentself.harness.attach:main"
+run-harness = "agentself.cli:run_harness_main"
+attach-repl = "agentself.cli:attach_repl_main"
+sync-agent-skills = "agentself.cli:sync_agent_skills_main"
 
 [project.optional-dependencies]
 dev = [

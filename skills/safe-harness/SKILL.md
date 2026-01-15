@@ -7,7 +7,7 @@ description: Run and inspect the safe REPL harness during prototyping.
 Use the safe harness to try REPL flows with restricted capabilities.
 
 Quick start:
-- Start the harness: `./scripts/run-harness.sh`
+- Start the harness: `uv run run-harness`
 - Attach with the REPL client.
 - Use `:state`, `:caps`, `:desc <name>`, or run code.
 

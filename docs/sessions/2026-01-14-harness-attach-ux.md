@@ -2,8 +2,8 @@
 
 ## Summary
 - Align attach REPL input behavior with modern Python REPLs (smart Enter).
-- Centralize harness paths and default locations via `AGENTSELF_HOME`.
-- Make helper scripts default to a disposable repo-local `_tmp/agentself` root.
+- Centralize harness paths and default locations via repo constants.
+- Make helper commands default to a disposable repo-local `_tmp/agentself` root.
 - Updated docs/skills/runbooks to match the new defaults and attach UX.
 - Added a docs update SOP and renamed `docs/session` to `docs/sessions`.
 - Allow single-file skills and move docs SOP into skills for agent-triggered use.
@@ -15,15 +15,15 @@
 
 ## Usage Highlights
 - Start harness (defaults to `_tmp/agentself`):
-  - `./scripts/run-harness.sh`
+  - `uv run run-harness`
 - Attach to a running harness:
-  - `./scripts/attach-repl.sh`
+  - `uv run attach-repl`
 - Prompt behavior:
   - Enter submits when input is complete.
   - Enter inserts newline when incomplete.
   - Esc+Enter always inserts newline.
 - Run multiple harnesses:
-  - Pass an explicit socket path or set `AGENTSELF_HOME`.
+  - Not supported yet (fixed socket path).
 
 ## Tests
 - `uv run pytest` (most recent run: 83 tests passed)

@@ -21,7 +21,7 @@ from agentself.harness.attach_server import AttachServer
 from agentself.harness.bootstrap import bootstrap_safe
 from agentself.harness.logging_utils import abbreviate, configure_logging
 from agentself.harness.mcp_config import install_from_config
-from agentself.harness.paths import safe_root_default
+from agentself.paths import SAFE_ROOT
 from agentself.harness.repl import REPLSubprocess
 from agentself.harness.runtime import HarnessRuntime, get_runtime
 from agentself.harness.state import SavedState, SavedCapability
@@ -552,7 +552,7 @@ def main():
     runtime = get_runtime()
 
     if args.profile == "safe":
-        safe_root = Path(args.safe_root).expanduser() if args.safe_root else safe_root_default()
+        safe_root = Path(args.safe_root).expanduser() if args.safe_root else SAFE_ROOT
         logger.info(
             "bootstrap safe profile root=%s seed=%s allow_cmd=%s",
             safe_root,

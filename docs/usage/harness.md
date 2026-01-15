@@ -1,30 +1,29 @@
 # Harness Usage
 
 ## Defaults
-- Helper scripts default to `_tmp/agentself/` inside the repo.
-- The library defaults to `.agentself/` (override with `AGENTSELF_HOME`).
-- Default socket: `$AGENTSELF_HOME/repl.sock`
-- Default safe root: `$AGENTSELF_HOME/sandboxes/safe`
+- Helper commands default to `_tmp/agentself/` inside the repo.
+- The library defaults to `.agentself/` inside the repo.
+- Default socket: `.agentself/repl.sock`
+- Default safe root: `.agentself/sandboxes/safe`
 
 ## Foreground (manual testing)
 ```
-./scripts/run-harness.sh
+uv run run-harness
 ```
 
 ## Attach
 ```
-./scripts/attach-repl.sh
+uv run attach-repl
 ```
 
-Attach to an active REPL using the same socket as the harness. If you run multiple harnesses,
-pass a unique socket path (or set `AGENTSELF_ATTACH_SOCKET` for that terminal).
+Attach to an active REPL using the same socket as the harness.
 
 Prompt behavior: Enter submits when input is complete; Esc+Enter inserts a newline.
 
 ## Logging workflow (agent SOP)
 ```
 HARNESS_LOG_FILE="./_tmp/logs/$(date +%Y%m%d-%H%M%S)-harness.log"
-./scripts/run-harness.sh 2>&1 | tee "$HARNESS_LOG_FILE"
+uv run run-harness 2>&1 | tee "$HARNESS_LOG_FILE"
 ```
 
 Inspect logs with standard tools:

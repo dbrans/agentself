@@ -6,13 +6,12 @@ import argparse
 import atexit
 import codeop
 import json
-import os
 import socket
 import sys
 from pathlib import Path
 from typing import Any, TextIO
 
-from agentself.harness.paths import attach_history_default, attach_socket_default
+from agentself.paths import ATTACH_HISTORY_PATH, ATTACH_SOCKET_PATH
 try:
     import readline
 except ImportError:  # pragma: no cover - platform dependent
@@ -29,17 +28,11 @@ except Exception:  # pragma: no cover - optional dependency
 
 
 def _default_socket() -> Path:
-    env_socket = os.environ.get("AGENTSELF_ATTACH_SOCKET")
-    if env_socket:
-        return Path(env_socket).expanduser()
-    return attach_socket_default()
+    return ATTACH_SOCKET_PATH
 
 
 def _history_path() -> Path:
-    env_history = os.environ.get("AGENTSELF_ATTACH_HISTORY")
-    if env_history:
-        return Path(env_history).expanduser()
-    return attach_history_default()
+    return ATTACH_HISTORY_PATH
 
 
 def _send_request(sock_file: TextIO, request: dict[str, Any]) -> dict[str, Any]:

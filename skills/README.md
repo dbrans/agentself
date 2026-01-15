@@ -12,4 +12,3 @@ In the REPL (safe profile):
 - `skills.fs` / `skills.cmd` for read-only access to `skills/`
 
 Tip: use `rg`/`grep` on this folder to search for specific terms.
-Set `AGENTSELF_SKILLS_DIRS` (path-separated) to add more roots.

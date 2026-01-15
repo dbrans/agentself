@@ -9,7 +9,7 @@ Goal: run the harness like a normal dev server, capture logs via shell redirecti
 ## Start + log capture
 ```
 LOG_FILE="./_tmp/harness-$(date +%Y%m%d-%H%M%S).log"
-./scripts/run-harness.sh 2>&1 | tee "$LOG_FILE"
+uv run run-harness 2>&1 | tee "$LOG_FILE"
 ```
 
 ## Inspect logs
