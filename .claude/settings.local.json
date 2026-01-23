@@ -19,7 +19,16 @@
       "Bash(python -c:*)",
       "Bash(pip install:*)",
       "Bash(timeout 2 uv run:*)",
-      "Bash(timeout 3 uv run:*)"
+      "Bash(timeout 3 uv run:*)",
+      "mcp__deepwiki__ask_question",
+      "Bash(gemini --help:*)",
+      "Bash(gemini --debug:*)",
+      "Bash(NODE_DEBUG=http,https gemini:*)",
+      "Bash(timeout 20 bash -c 'NODE_DEBUG=http,https gemini -p \"\"\"\"Say hello\"\"\"\" 2>&1')",
+      "Bash(tee:*)",
+      "Bash(mitmdump:*)",
+      "Bash(gemini)",
+      "Bash(cat:*)"
     ]
   }
 }
