@@ -42,27 +42,17 @@ context windows and, even for shorter prompts, dramatically outperform the quali
 
 
 
-
-
-![](docs/specs/2026-01-25 Research/images/Arxiv-MIT-RLMs-Paper.pdf-0-2.png)
-
-
-|100<br>80<br>(%)<br>60<br>Score<br>40<br>20|Col2|Col3|Col4|Col5|Col6|S-NI|AH|Col9|
-|---|---|---|---|---|---|---|---|---|
-|20<br>40<br>60<br>80<br>100<br>Score (%)|||||||||
-|20<br>40<br>60<br>80<br>100<br>Score (%)||||||~~OOL~~|~~NG~~||
-|20<br>40<br>60<br>80<br>100<br>Score (%)||||||OOLON|G-Pairs||
-
-
-|00<br>80<br>60<br>40<br>20|Col2|Col3|Col4|Col5|Col6|Col7|S-NI|AH|
-|---|---|---|---|---|---|---|---|---|
-|20<br>40<br>60<br>80<br>00|||||||~~OOLON~~|~~G-Pairs~~|
-|20<br>40<br>60<br>80<br>00|||||||~~OOLO~~|~~NG~~|
-|20<br>40<br>60<br>80<br>00|||||||||
-
-
-
 ![](docs/specs/2026-01-25 Research/images/Arxiv-MIT-RLMs-Paper.pdf-0-1.png)
+
+
+
+
+
+
+
+
+
+
 
 Figure 1: A comparison of GPT-5 and a corresponding RLM on three long-context tasks of increasing complexity: **S-NIAH**, **OOLONG**, and **OOLONG-Pairs** . For each task, we scale the input
 length from 2 [13] to 2 [18] . GPT-5 performance degrades significantly as a function of both input length
@@ -254,28 +244,25 @@ complexity. In gray is the average API cost _±_ the standard deviation of each 
 indicates runs where the method ran into input context limits.
 
 
-**Model** **CodeQA** **BrowseComp+ (1K)** **OOLONG** **OOLONG-Pairs**
+| Model | CodeQA | BrowseComp+ (1K) | OOLONG | OOLONG-Pairs |
+|-------|--------|------------------|--------|--------------|
+| **Task Length N (tokens)** | 23K-4.2M | 6M-11M | 131K | 32K |
+| | | | | |
+| **Qwen3-Coder-480B** | | | | |
+| Base Model | 20.00* ($0.13 ± $0.08) | 0.00* (N/A ± N/A) | 36.00 ($0.06 ± $0.00) | 0.06 ($0.05 ± $0.01) |
+| CodeAct (+ BM25) | 24.00* ($0.17 ± $0.08) | 12.66 ($0.39 ± $0.50) | 38.00 ($1.51 ± $1.09) | 0.28 ($1.54 ± $0.35) |
+| Summary agent | 50.00 ($1.26 ± $1.50) | 38.00 ($8.98 ± $2.12) | 44.06 ($0.15 ± $0.01) | 0.31 ($0.05 ± $0.00) |
+| RLM | 56.00 ($0.92 ± $1.23) | 44.66 ($0.84 ± $0.63) | **48.00** ($0.61 ± $0.49) | **23.11** ($1.02 ± $0.52) |
+| RLM (no sub-calls) | **66.00** ($0.18 ± $0.58) | **46.00** ($0.82 ± $0.69) | 43.50 ($0.32 ± $0.13) | 17.34 ($1.77 ± $1.23) |
+| | | | | |
+| **GPT-5** | | | | |
+| Base Model | 24.00* ($0.13 ± $0.07) | 0.00* (N/A ± N/A) | 44.00 ($0.14 ± $0.02) | 0.04 ($0.16 ± $0.10) |
+| CodeAct (+ BM25) | 22.00* ($0.06 ± $0.08) | 51.00 ($0.71 ± $1.20) | 38.00 ($0.61 ± $1.06) | 24.67 ($0.75 ± $0.43) |
+| Summary agent | 58.00 ($1.31 ± $1.46) | 70.47 ($0.57 ± $0.10) | 46.00 ($0.13 ± $0.01) | 0.01 ($0.13 ± $0.09) |
+| RLM | **62.00** ($0.11 ± $0.10) | **91.33** ($0.99 ± $1.22) | **56.50** ($0.43 ± $0.85) | **58.00** ($0.33 ± $0.20) |
+| RLM (no sub-calls) | 58.00 ($0.18 ± $0.56) | 88.00 ($0.44 ± $0.90) | 36.00 ($0.37 ± $0.42) | 43.93 ($0.69 ± $1.16) |
 
-
-**Task Length** _N_ **(tokens)** 23K-4.2M 6M-11M 131K 32K
-
-
-**Qwen3-Coder-480B**
-
-Base Model 20.00 _[∗]_ ($0.13 _±_ $0.08) 0.00 _[∗]_ (N/A) _±_ (N/A) 36.00 ($0.06 _±_ $0.00) 0.06 ($0.05 _±_ $0.01)
-CodeAct (+ BM25) 24.00 _[∗]_ ($0.17 _±_ $0.08) 12.66 ($0.39 _±_ $0.50) 38.00 ($1.51 _±_ $1.09) 0.28 ($1.54 _±_ $0.35)
-Summary agent 50.00 ($1.26 _±_ $1.50) 38.00 ($8.98 _±_ $2.12) 44.06 ($0.15 _±_ $0.01) 0.31 ($0.05 _±_ $0.00)
-RLM 56.00 ($0.92 _±_ $1.23) 44.66 ($0.84 _±_ $0.63) **48.00** ($0.61 _±_ $0.49) **23.11** ($1.02 _±_ $0.52)
-RLM (no sub-calls) **66.00** ($0.18 _±_ $0.58) **46.00** ($0.82 _±_ $0.69) 43.50 ($0.32 _±_ $0.13) 17.34 ($1.77 _±_ $1.23)
-
-
-**GPT-5**
-
-Base Model 24.00 _[∗]_ ($0.13 _±_ $0.07) 0.00 _[∗]_ (N/A) _±_ (N/A) 44.00 ($0.14 _±_ $0.02) 0.04 ($0.16 _±_ $0.10)
-CodeAct (+ BM25) 22.00 _[∗]_ ($0.06 _±_ $0.08) 51.00 ($0.71 _±_ $1.20) 38.00 ($0.61 _±_ $1.06) 24.67 ($0.75 _±_ $0.43)
-Summary agent 58.00 ($1.31 _±_ $1.46) 70.47 ($0.57 _±_ $0.10) 46.00 ($0.13 _±_ $0.01) 0.01 ($0.13 _±_ $0.09)
-RLM **62.00** ($0.11 _±_ $0.10) **91.33** ($0.99 _±_ $1.22) **56.50** ($0.43 _±_ $0.85) **58.00** ($0.33 _±_ $0.20)
-RLM (no sub-calls) 58.00 ($0.18 _±_ $0.56) 88.00 ($0.44 _±_ $0.90) 36.00 ($0.37 _±_ $0.42) 43.93 ($0.69 _±_ $1.16)
+*\* indicates runs where the method ran into input context limits. Costs shown in gray are average API cost ± standard deviation.*
 
 
 4
